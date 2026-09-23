@@ -1,19 +1,49 @@
 import type { CameraMode } from '../render/cameras';
+import {
+  DIVISIONS, POINTS, PROMOTE_POINTS, RACES_PER_SEASON, type CampaignState, type OpponentSetup, type PlanetDef, type RaceOutcome,
+} from '../sim/campaign';
+import {
+  CAR_PRICES, CHARACTERS, CHARGE_KINDS, chargePrice, MAX_EXTRA_CHARGES, MAX_UPGRADE, tradeInValue, UPGRADE_HELP, UPGRADE_KINDS, UPGRADE_LABEL,
+  upgradePrice, type Character, type ChargeKind, type UpgradeKind,
+} from '../sim/garage';
+import type { Track, TrackDef } from '../sim/track';
 import type { VehicleSpec } from '../sim/vehicle';
 import { formatTime } from './hud';
+import { drawTrack, trackTransform } from './trackMap';
 
-export interface StartOptions {
+export const WEAPON_LABEL = { laser: 'Laser', missile: 'Míssil', mine: 'Mina', oil: 'Óleo' } as const;
+const CHARGE_LABEL: Record<ChargeKind, string> = { front: 'Arma frontal', rear: 'Arma traseira', nitro: 'Nitro' };
+export const COLORS = [0x2f7bff, 0xe02828, 0x2fc840, 0xf2c318, 0xb040e0, 0xf0f0f0];
+const CAMERAS: [CameraMode, string][] = [['iso', 'Vista aérea'], ['cockpit', 'Cockpit'], ['chase', 'Perseguição']];
+
+const money = (n: number) => `$${n.toLocaleString('pt-BR')}`;
+const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]!);
+
+export interface QuickOptions {
+  trackId: string;
   vehicleId: string;
   color: number;
-  camera: CameraMode;
 }
 
-interface MenuCallbacks {
-  vehicles: VehicleSpec[];
-  onStart: (o: StartOptions) => void;
-  onResume: () => void;
-  onRestart: () => void;
-  onMenu: () => void;
+export interface MenuActions {
+  quickRace(o: QuickOptions): void;
+  newCampaign(characterId: string, color: number): void;
+  continueCampaign(): void;
+  loadPassword(code: string): boolean;
+  campaignRace(): void;
+  openShop(): void;
+  buyCar(id: string): void;
+  buyUpgrade(kind: UpgradeKind): void;
+  buyCharge(kind: ChargeKind): void;
+  showPassword(): void;
+  backToHub(): void;
+  resume(): void;
+  restart(): void;
+  quit(): void;
+  resultsContinue(): void;
+  toMain(): void;
+  setCamera(mode: CameraMode): void;
 }
 
 export interface ResultRow {
@@ -27,149 +57,384 @@ export interface ResultRow {
   me: boolean;
 }
 
-export const WEAPON_LABEL = { laser: 'Laser', missile: 'Míssil', mine: 'Mina', oil: 'Óleo' } as const;
+export interface HubData {
+  state: CampaignState;
+  planet: PlanetDef;
+  track: Track;
+  opponents: OpponentSetup[];
+  spec: VehicleSpec;
+  character: Character;
+  vehicles: Record<string, VehicleSpec>;
+}
 
-const COLORS = [0x2f7bff, 0xe02828, 0x2fc840, 0xf2c318, 0xb040e0, 0xf0f0f0];
+export interface CampaignReport {
+  outcome: RaceOutcome;
+  pointsEarned: number;
+  points: number;
+  label: string;
+}
 
 function stat(label: string, value: number): string {
-  return `<div class="stat"><span>${label}</span><i style="width:${Math.round(value * 100)}%"></i></div>`;
+  return `<div class="stat"><span>${label}</span><i style="width:${Math.round(Math.min(1, value) * 100)}%"></i></div>`;
+}
+
+function pips(n: number, max: number): string {
+  return `<span class="pips">${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</span>`;
 }
 
 export class Menus {
-  private main: HTMLElement;
-  private pause: HTMLElement;
-  private results: HTMLElement;
-  private opts: StartOptions = { vehicleId: 'marauder', color: COLORS[0], camera: 'iso' };
+  private el: HTMLElement;
+  private camera: CameraMode = 'iso';
+  private quick: QuickOptions = { trackId: 'chem6-1', vehicleId: 'marauder', color: COLORS[0] };
+  private newChar = { characterId: CHARACTERS[0].id, color: COLORS[0] };
+  private shopTab: 'cars' | 'upgrades' | 'weapons' = 'upgrades';
+  private lastHub: HubData | null = null;
+  private inCampaign = false;
 
-  constructor(root: HTMLElement, cb: MenuCallbacks) {
-    this.main = this.panel(root, 'menu-main');
-    this.pause = this.panel(root, 'menu-pause');
-    this.results = this.panel(root, 'menu-results');
+  constructor(
+    root: HTMLElement,
+    private actions: MenuActions,
+    private vehicles: Record<string, VehicleSpec>,
+    private tracks: TrackDef[],
+  ) {
+    this.el = document.createElement('div');
+    this.el.className = 'overlay';
+    this.el.style.display = 'none';
+    root.appendChild(this.el);
+    this.el.addEventListener('click', (e) => this.onClick(e));
+  }
 
-    const maxSpeed = Math.max(...cb.vehicles.map((v) => v.maxSpeed));
-    const maxAccel = Math.max(...cb.vehicles.map((v) => v.accel));
-    const maxGrip = Math.max(...cb.vehicles.map((v) => v.grip));
-    const maxArmor = Math.max(...cb.vehicles.map((v) => v.armor));
-    this.main.innerHTML = `
+  setCameraChoice(mode: CameraMode): void {
+    this.camera = mode;
+  }
+
+  private show(html: string): void {
+    this.el.innerHTML = html;
+    this.el.style.display = '';
+    this.el.scrollTop = 0;
+    this.refresh();
+  }
+
+  hideAll(): void {
+    this.el.style.display = 'none';
+  }
+
+  private cameraPicker(): string {
+    return `<div class="cams">${CAMERAS.map(([m, l]) => `<button class="cam" data-cam="${m}">${l}</button>`).join('')}</div>`;
+  }
+
+  private colorPicker(group: string): string {
+    return `<div class="colors">${COLORS.map((c) => `<button class="color" data-color="${c}" data-group="${group}" style="background:${hex(c)}" aria-label="cor"></button>`).join('')}</div>`;
+  }
+
+  private carCard(v: VehicleSpec, extra = ''): string {
+    const all = Object.values(this.vehicles);
+    const max = (k: keyof VehicleSpec) => Math.max(...all.map((x) => x[k] as number));
+    return `<b>${v.name}</b>
+      ${stat('Velocidade', v.maxSpeed / max('maxSpeed'))}${stat('Aceleração', v.accel / max('accel'))}${stat('Aderência', v.grip / max('grip'))}${stat('Blindagem', v.armor / max('armor'))}
+      <em>${WEAPON_LABEL[v.front]} + ${WEAPON_LABEL[v.rear]}</em>${extra}`;
+  }
+
+  /* ---------------- menu principal ---------------- */
+
+  showMain(hasSave: boolean): void {
+    this.inCampaign = false;
+    this.show(`
       <div class="card">
         <h1>ROCK <span>'N'</span> ROLL<br/>RACING <em>3D</em></h1>
-        <p class="sub">Chem VI, Divisão B — você contra Rip, Shred e Viper Mackay</p>
+        <p class="sub">6 planetas · 12 pistas · 5 carros · armas e muito rock</p>
+        <div class="main-buttons">
+          ${hasSave ? `<button class="go" data-act="continue">CONTINUAR CAMPANHA</button>` : ''}
+          <button class="${hasSave ? '' : 'go'}" data-act="new">Nova campanha</button>
+          <button data-act="quick">Corrida rápida</button>
+          <button data-act="password">Carregar senha</button>
+        </div>
+        ${this.helpBlock()}
+      </div>`);
+  }
+
+  private helpBlock(): string {
+    return `<details class="help">
+      <summary>Controles</summary>
+      <p><b>Teclado:</b> ↑/W acelera · ↓/S freia/ré · ←→/A D vira · Espaço/J atira · X/K arma traseira · Shift nitro · C câmera · Esc pausa · M som</p>
+      <p><b>Controle:</b> RT acelera · LT freia · analógico vira · X/RB atira · B/LB arma traseira · L3/R3 nitro · Y câmera · Start pausa</p>
+      <p><b>Celular:</b> botões na tela; 🎥 troca a câmera. Melhor com o aparelho deitado.</p>
+      <p>Armas e nitro recarregam a cada volta. Dinheiro e blindagem aparecem pela pista.</p>
+    </details>`;
+  }
+
+  /* ---------------- corrida rápida ---------------- */
+
+  private showQuick(): void {
+    this.show(`
+      <div class="card">
+        <h2>CORRIDA RÁPIDA</h2>
+        <h3>Pista</h3>
+        <div class="tracks">${this.tracks.map((t) => `<button class="trk" data-track="${t.id}"><b>${t.name}</b><small>${t.planet}</small></button>`).join('')}</div>
         <h3>Carro</h3>
-        <div class="cars">
-          ${cb.vehicles
-            .map(
-              (v) => `<button class="car" data-id="${v.id}"><b>${v.name}</b>
-                ${stat('Velocidade', v.maxSpeed / maxSpeed)}${stat('Aceleração', v.accel / maxAccel)}${stat('Aderência', v.grip / maxGrip)}${stat('Blindagem', v.armor / maxArmor)}
-                <em>${WEAPON_LABEL[v.front]} + ${WEAPON_LABEL[v.rear]}</em>
-              </button>`,
-            )
-            .join('')}
+        <div class="cars">${Object.values(this.vehicles).map((v) => `<button class="car" data-vehicle="${v.id}">${this.carCard(v)}</button>`).join('')}</div>
+        <h3>Cor</h3>${this.colorPicker('quick')}
+        <h3>Câmera inicial</h3>${this.cameraPicker()}
+        <button class="go" data-act="quick-start">CORRER!</button>
+        <button class="link" data-act="main">← Voltar</button>
+      </div>`);
+  }
+
+  /* ---------------- nova campanha ---------------- */
+
+  private showNewCampaign(): void {
+    const bonusText = (c: Character) =>
+      Object.entries(c.bonus)
+        .map(([k, v]) => `${{ accel: 'Aceleração', topSpeed: 'Velocidade', cornering: 'Curvas', jumping: 'Saltos' }[k]} ${'+'.repeat(v)}`)
+        .join(' · ');
+    this.show(`
+      <div class="card">
+        <h2>NOVA CAMPANHA</h2>
+        <p class="sub center">Comece em Chem VI, Divisão B, com um Dirt Devil e ${money(10000)}.
+          Some ${PROMOTE_POINTS} pontos em ${RACES_PER_SEASON} corridas para subir de divisão (1º: ${POINTS[0]} · 2º: ${POINTS[1]} · 3º: ${POINTS[2]}).</p>
+        <h3>Escolha seu piloto</h3>
+        <div class="chars">${CHARACTERS.map((c) => `<button class="char" data-char="${c.id}"><b>${c.name}</b><small>${c.description}</small><em>${bonusText(c)}</em></button>`).join('')}</div>
+        <h3>Cor do carro</h3>${this.colorPicker('new')}
+        <button class="go" data-act="new-start">COMEÇAR</button>
+        <button class="link" data-act="main">← Voltar</button>
+      </div>`);
+  }
+
+  /* ---------------- garagem (hub da campanha) ---------------- */
+
+  showHub(d: HubData, notice = ''): void {
+    this.lastHub = d;
+    this.inCampaign = true;
+    const s = d.state;
+    const div = DIVISIONS[s.division];
+    const pct = Math.min(100, (s.points / PROMOTE_POINTS) * 100);
+    const u = s.car.upgrades;
+    this.show(`
+      <div class="card wide">
+        <div class="hub-head">
+          <div><small>PLANETA</small><b>${d.planet.name}</b></div>
+          <div><small>DIVISÃO</small><b>${div}</b></div>
+          <div><small>CORRIDA</small><b>${s.race + 1}/${RACES_PER_SEASON}</b></div>
+          <div><small>DINHEIRO</small><b class="gold">${money(s.money)}</b></div>
         </div>
-        <h3>Cor</h3>
-        <div class="colors">${COLORS.map((c) => `<button class="color" data-c="${c}" style="background:#${c.toString(16).padStart(6, '0')}" aria-label="cor"></button>`).join('')}</div>
-        <h3>Câmera inicial</h3>
-        <div class="cams">
-          <button class="cam" data-m="iso">Vista aérea</button>
-          <button class="cam" data-m="cockpit">Cockpit</button>
-          <button class="cam" data-m="chase">Perseguição</button>
+        <div class="points"><span>Pontos: <b>${s.points}</b> / ${PROMOTE_POINTS} para subir</span><div class="bar"><i style="width:${pct}%"></i></div></div>
+        ${notice ? `<div class="notice">${notice}</div>` : ''}
+        <div class="hub-grid">
+          <div class="panel">
+            <h3>Próxima pista</h3>
+            <canvas class="hub-map" width="240" height="170"></canvas>
+            <p class="trk-name"><b>${d.track.def.name}</b> · ${d.track.def.laps} voltas${d.track.def.slime ? ' · poças de gosma' : ''}</p>
+            <h3>Rivais</h3>
+            <ul class="rivals">${d.opponents.map((o) => `<li><span class="dot" style="background:${hex(o.color)}"></span>${o.name} <small>${o.spec.name}</small></li>`).join('')}</ul>
+          </div>
+          <div class="panel">
+            <h3>Seu carro</h3>
+            <div class="mycar">${this.carCard(d.spec)}</div>
+            <ul class="upg-list">
+              ${UPGRADE_KINDS.map((k) => `<li>${UPGRADE_LABEL[k]} ${pips(u[k], MAX_UPGRADE)}</li>`).join('')}
+            </ul>
+            <p class="small-note">Piloto: <b>${d.character.name}</b> · ${d.spec.frontCharges}× ${WEAPON_LABEL[d.spec.front]} · ${d.spec.rearCharges}× ${WEAPON_LABEL[d.spec.rear]} · ${d.spec.nitroCharges}× nitro</p>
+          </div>
         </div>
-        <button class="go" data-act="start">CORRER!</button>
-        <details class="help">
-          <summary>Controles</summary>
-          <p><b>Teclado:</b> ↑/W acelera · ↓/S freia/ré · ←→/A D vira · Shift nitro · C troca câmera · Esc pausa</p>
-          <p><b>Controle:</b> RT acelera · LT freia · analógico vira · X/RB atira · B/LB arma traseira · L3/R3 nitro · Y câmera · Start pausa</p>
-          <p><b>Celular:</b> botões na tela; 🎥 troca a câmera. Melhor com o aparelho deitado.</p>
-          <p><b>Armas:</b> Espaço/J atira (arma frontal) · X/K solta a arma traseira (mina ou óleo). Cargas e nitro recarregam a cada volta. M liga/desliga o som.</p>
-        </details>
-      </div>`;
-    this.pause.innerHTML = `
+        <h3>Câmera</h3>${this.cameraPicker()}
+        <button class="go" data-act="hub-race">CORRER!</button>
+        <div class="row-buttons">
+          <button data-act="shop">🛒 Loja</button>
+          <button data-act="show-password">🔑 Senha</button>
+          <button data-act="main">Menu</button>
+        </div>
+      </div>`);
+    const canvas = this.el.querySelector<HTMLCanvasElement>('.hub-map');
+    if (canvas) {
+      const map = trackTransform(d.track, canvas.width, canvas.height, 12);
+      drawTrack(canvas.getContext('2d')!, d.track, map, 6);
+    }
+  }
+
+  /* ---------------- loja ---------------- */
+
+  showShop(d: HubData, notice = ''): void {
+    this.lastHub = d;
+    const s = d.state;
+    const tabs = `<div class="tabs">
+      ${(['upgrades', 'weapons', 'cars'] as const).map((t) => `<button class="tab" data-tab="${t}">${{ upgrades: 'Melhorias', weapons: 'Armas', cars: 'Carros' }[t]}</button>`).join('')}
+    </div>`;
+    let body = '';
+    if (this.shopTab === 'upgrades') {
+      body = UPGRADE_KINDS.map((k) => {
+        const price = upgradePrice(s.car, k);
+        return `<div class="shop-row"><div><b>${UPGRADE_LABEL[k]}</b> ${pips(s.car.upgrades[k], MAX_UPGRADE)}<small>${UPGRADE_HELP[k]}</small></div>
+          ${price === null ? '<span class="maxed">MÁXIMO</span>' : `<button class="buy" data-upgrade="${k}" ${price > s.money ? 'disabled' : ''}>${money(price)}</button>`}</div>`;
+      }).join('');
+    } else if (this.shopTab === 'weapons') {
+      body = CHARGE_KINDS.map((k) => {
+        const price = chargePrice(s.car, k);
+        const label = k === 'front' ? `${CHARGE_LABEL[k]} (${WEAPON_LABEL[d.spec.front]})` : k === 'rear' ? `${CHARGE_LABEL[k]} (${WEAPON_LABEL[d.spec.rear]})` : CHARGE_LABEL[k];
+        const total = k === 'front' ? d.spec.frontCharges : k === 'rear' ? d.spec.rearCharges : d.spec.nitroCharges;
+        return `<div class="shop-row"><div><b>${label}</b> ${pips(s.car.charges[k], MAX_EXTRA_CHARGES)}<small>${total} cargas por volta · +1 por compra</small></div>
+          ${price === null ? '<span class="maxed">MÁXIMO</span>' : `<button class="buy" data-charge="${k}" ${price > s.money ? 'disabled' : ''}>${money(price)}</button>`}</div>`;
+      }).join('');
+    } else {
+      const trade = tradeInValue(s.car);
+      body =
+        `<p class="small-note">Ao trocar de carro, o atual (com melhorias) entra como parte do pagamento: <b>${money(trade)}</b>.</p>` +
+        Object.values(this.vehicles)
+          .map((v) => {
+            const mine = v.id === s.car.vehicleId;
+            const net = Math.max(0, CAR_PRICES[v.id].price - trade);
+            return `<div class="shop-row car-row"><div class="car">${this.carCard(v, `<small>Preço: ${money(CAR_PRICES[v.id].price)}</small>`)}</div>
+              ${mine ? '<span class="maxed">SEU CARRO</span>' : `<button class="buy" data-buycar="${v.id}" ${net > s.money ? 'disabled' : ''}>${money(net)}</button>`}</div>`;
+          })
+          .join('');
+    }
+    this.show(`
+      <div class="card wide">
+        <div class="shop-head"><h2>LOJA</h2><b class="gold">${money(s.money)}</b></div>
+        ${notice ? `<div class="notice">${notice}</div>` : ''}
+        ${tabs}
+        <div class="shop-body">${body}</div>
+        <button class="go" data-act="hub">← Voltar à garagem</button>
+      </div>`);
+  }
+
+  /* ---------------- senha ---------------- */
+
+  showPassword(code: string | null): void {
+    const saving = code !== null;
+    this.show(`
+      <div class="card small">
+        <h2>SENHA</h2>
+        <p class="small-note">${saving ? 'Guarde esta senha para continuar em outro aparelho ou navegador.' : 'Cole aqui uma senha salva para continuar a campanha.'}</p>
+        <textarea class="pw" rows="5" ${saving ? 'readonly' : ''} spellcheck="false">${saving ? esc(code) : ''}</textarea>
+        <p class="pw-msg"></p>
+        ${saving ? '<button class="go" data-act="copy-password">Copiar</button><button data-act="hub">Voltar</button>' : '<button class="go" data-act="load-password">Carregar</button><button data-act="main">Voltar</button>'}
+      </div>`);
+  }
+
+  /* ---------------- pausa e resultado ---------------- */
+
+  showPause(): void {
+    this.show(`
       <div class="card small">
         <h2>PAUSADO</h2>
         <button class="go" data-act="resume">Continuar</button>
         <button data-act="restart">Reiniciar corrida</button>
-        <button data-act="menu">Menu principal</button>
-      </div>`;
-
-    for (const panel of [this.main, this.pause, this.results]) {
-      panel.addEventListener('click', (e) => {
-        const t = (e.target as HTMLElement).closest('button');
-        if (!t) return;
-        if (t.dataset.id) this.opts.vehicleId = t.dataset.id;
-        if (t.dataset.c) this.opts.color = Number(t.dataset.c);
-        if (t.dataset.m) this.opts.camera = t.dataset.m as CameraMode;
-        switch (t.dataset.act) {
-          case 'start':
-            cb.onStart({ ...this.opts });
-            break;
-          case 'resume':
-            cb.onResume();
-            break;
-          case 'restart':
-            cb.onRestart();
-            break;
-          case 'menu':
-            cb.onMenu();
-            break;
-        }
-        this.refreshSelection();
-      });
-    }
-    this.refreshSelection();
+        <button data-act="quit">${this.inCampaign ? 'Voltar à garagem (corrida não conta)' : 'Menu principal'}</button>
+      </div>`);
   }
 
-  private panel(root: HTMLElement, cls: string): HTMLElement {
-    const el = document.createElement('div');
-    el.className = `overlay ${cls}`;
-    el.style.display = 'none';
-    root.appendChild(el);
-    return el;
-  }
-
-  private refreshSelection(): void {
-    this.main.querySelectorAll<HTMLElement>('.car').forEach((b) => b.classList.toggle('sel', b.dataset.id === this.opts.vehicleId));
-    this.main.querySelectorAll<HTMLElement>('.color').forEach((b) => b.classList.toggle('sel', Number(b.dataset.c) === this.opts.color));
-    this.main.querySelectorAll<HTMLElement>('.cam').forEach((b) => b.classList.toggle('sel', b.dataset.m === this.opts.camera));
-  }
-
-  hideAll(): void {
-    for (const p of [this.main, this.pause, this.results]) p.style.display = 'none';
-  }
-
-  showMain(): void {
-    this.hideAll();
-    this.main.style.display = '';
-  }
-
-  showPause(): void {
-    this.hideAll();
-    this.pause.style.display = '';
-  }
-
-  showResults(rows: ResultRow[], lapTimes: number[]): void {
-    this.hideAll();
+  showResults(rows: ResultRow[], lapTimes: number[], report: CampaignReport | null): void {
     const best = lapTimes.length ? Math.min(...lapTimes) : 0;
     const me = rows.find((r) => r.me);
-    this.results.innerHTML = `
+    const title =
+      report?.outcome === 'champion' ? '🏆 CAMPEÃO!' : report?.outcome === 'promoted' ? 'PROMOVIDO!' : me && me.place === 1 ? 'VITÓRIA!' : 'RESULTADO';
+    const campaignBlock = report
+      ? `<div class="notice ${report.outcome}">
+          ${report.outcome === 'champion' ? 'Você venceu a galáxia inteira! Lenda do rock.' : ''}
+          ${report.outcome === 'promoted' ? `Subiu para: <b>${report.label}</b>` : ''}
+          ${report.outcome === 'retry' ? `Não somou ${PROMOTE_POINTS} pontos. A temporada recomeça — melhore o carro na loja!` : ''}
+          ${report.outcome === 'continue' ? `+${report.pointsEarned} pontos · total ${report.points}/${PROMOTE_POINTS}` : ''}
+        </div>`
+      : '';
+    this.show(`
       <div class="card small results">
-        <h2>${me && me.place === 1 ? 'VITÓRIA!' : 'RESULTADO'}</h2>
+        <h2>${title}</h2>
+        ${campaignBlock}
         <table>
           <tr><th>#</th><th>Piloto</th><th>Tempo</th><th>Abates</th><th>Prêmio</th></tr>
           ${rows
             .map(
-              (r) => `<tr class="${r.me ? 'me' : ''}"><td>${r.place}º</td><td><span class="dot" style="background:${r.color}"></span>${r.name}</td>
-                <td>${r.time !== null ? formatTime(r.time) : '—'}</td><td>${r.kills}</td><td>$${r.prize.toLocaleString('pt-BR')}</td></tr>`,
+              (r) => `<tr class="${r.me ? 'me' : ''}"><td>${r.place}º</td><td><span class="dot" style="background:${r.color}"></span>${esc(r.name)}</td>
+                <td>${r.time !== null ? formatTime(r.time) : '—'}</td><td>${r.kills}</td><td>${money(r.prize)}</td></tr>`,
             )
             .join('')}
         </table>
-        ${
-          lapTimes.length
-            ? `<table>${lapTimes.map((t, i) => `<tr class="${t === best ? 'best' : ''}"><td>Volta ${i + 1}</td><td>${formatTime(t)}</td></tr>`).join('')}</table>`
-            : ''
-        }
-        ${me ? `<p class="money">Seu dinheiro nesta corrida: <b>$${me.money.toLocaleString('pt-BR')}</b></p>` : ''}
-        <button class="go" data-act="restart">Correr de novo</button>
-        <button data-act="menu">Menu principal</button>
-      </div>`;
-    this.results.style.display = '';
+        ${lapTimes.length ? `<table>${lapTimes.map((t, i) => `<tr class="${t === best ? 'best' : ''}"><td>Volta ${i + 1}</td><td>${formatTime(t)}</td></tr>`).join('')}</table>` : ''}
+        ${me ? `<p class="money">Ganho nesta corrida (prêmio + pista): <b>${money(me.money)}</b></p>` : ''}
+        ${report ? '<button class="go" data-act="results-continue">Continuar</button>' : '<button class="go" data-act="restart">Correr de novo</button><button data-act="main">Menu principal</button>'}
+      </div>`);
+  }
+
+  /* ---------------- eventos ---------------- */
+
+  private refresh(): void {
+    const sel = (selector: string, on: (el: HTMLElement) => boolean) => this.el.querySelectorAll<HTMLElement>(selector).forEach((b) => b.classList.toggle('sel', on(b)));
+    sel('.cam', (b) => b.dataset.cam === this.camera);
+    sel('.car[data-vehicle]', (b) => b.dataset.vehicle === this.quick.vehicleId);
+    sel('.trk', (b) => b.dataset.track === this.quick.trackId);
+    sel('.char', (b) => b.dataset.char === this.newChar.characterId);
+    sel('.tab', (b) => b.dataset.tab === this.shopTab);
+    sel('.color', (b) => Number(b.dataset.color) === (b.dataset.group === 'new' ? this.newChar.color : this.quick.color));
+  }
+
+  private onClick(e: Event): void {
+    const t = (e.target as HTMLElement).closest('button');
+    if (!t || t.disabled) return;
+    const d = t.dataset;
+    if (d.cam) {
+      this.camera = d.cam as CameraMode;
+      this.actions.setCamera(this.camera);
+    }
+    if (d.vehicle) this.quick.vehicleId = d.vehicle;
+    if (d.track) this.quick.trackId = d.track;
+    if (d.char) this.newChar.characterId = d.char;
+    if (d.color) {
+      if (d.group === 'new') this.newChar.color = Number(d.color);
+      else this.quick.color = Number(d.color);
+    }
+    if (d.tab && this.lastHub) {
+      this.shopTab = d.tab as typeof this.shopTab;
+      this.showShop(this.lastHub);
+      return;
+    }
+    if (d.upgrade) this.actions.buyUpgrade(d.upgrade as UpgradeKind);
+    if (d.charge) this.actions.buyCharge(d.charge as ChargeKind);
+    if (d.buycar) this.actions.buyCar(d.buycar);
+
+    switch (d.act) {
+      case 'continue':
+        return this.actions.continueCampaign();
+      case 'new':
+        return this.showNewCampaign();
+      case 'new-start':
+        return this.actions.newCampaign(this.newChar.characterId, this.newChar.color);
+      case 'quick':
+        return this.showQuick();
+      case 'quick-start':
+        return this.actions.quickRace({ ...this.quick });
+      case 'password':
+        return this.showPassword(null);
+      case 'show-password':
+        return this.actions.showPassword();
+      case 'copy-password': {
+        const ta = this.el.querySelector<HTMLTextAreaElement>('.pw')!;
+        ta.select();
+        void navigator.clipboard?.writeText(ta.value).catch(() => document.execCommand('copy'));
+        this.el.querySelector('.pw-msg')!.textContent = 'Copiada!';
+        return;
+      }
+      case 'load-password': {
+        const ok = this.actions.loadPassword(this.el.querySelector<HTMLTextAreaElement>('.pw')!.value);
+        if (!ok) this.el.querySelector('.pw-msg')!.textContent = 'Senha inválida.';
+        return;
+      }
+      case 'hub-race':
+        return this.actions.campaignRace();
+      case 'shop':
+        return this.actions.openShop();
+      case 'hub':
+        return this.actions.backToHub();
+      case 'main':
+        return this.actions.toMain();
+      case 'resume':
+        return this.actions.resume();
+      case 'restart':
+        return this.actions.restart();
+      case 'quit':
+        return this.actions.quit();
+      case 'results-continue':
+        return this.actions.resultsContinue();
+    }
+    this.refresh();
   }
 }

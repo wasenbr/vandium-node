@@ -90,7 +90,14 @@ rock-n-roll-racing-3d/
 
 Upgrades por carro: **motor, pneus, suspensão, blindagem** + cargas de armas/nitro. Cores personalizáveis.
 
-### Campanha
+### Campanha (implementada)
+- Temporadas de 4 corridas; pontos 10/6/3/0; 24 pontos sobem de divisão (B → A → próximo planeta).
+  Sem pontos suficientes, a temporada recomeça (dinheiro e carro continuam).
+- Começa com Dirt Devil e $10.000; prêmios crescem a cada planeta/divisão; rivais ganham carros
+  e melhorias melhores (curva de dificuldade calibrada por simulação).
+- Save automático no navegador + "senha" exportável para continuar em outro aparelho.
+
+### Campanha (visão original)
 - 6 planetas (Chem VI, Drakonis, Bogmire, New Mojave, Nho, Inferno), cada um com visual e
   perigos próprios (gelo, lava, pântano, deserto…).
 - Divisões B → A em cada planeta; pontuação mínima para avançar.
@@ -138,7 +145,8 @@ Caminho proposto:
 1. Salvar os mapas/capturas das pistas em `rock-n-roll-racing-3d/referencias/` (ex.: `chem6-1.png`).
 2. Eu converto cada mapa na sequência de peças e confiro a forma pelo minimapa.
 3. O editor de pistas (fase 7) permite ajustes finos visuais.
-Enquanto isso, `chem6-1` é uma pista provisória no estilo de Chem VI.
+Enquanto isso há 12 pistas provisórias (2 por planeta) no estilo de cada planeta, todas
+validadas por teste (circuito fecha e a CPU completa voltas).
 - **Editor de pistas no navegador** (grade 2D clicável) para recriar as pistas rapidamente a
   partir de mapas/capturas do original e criar novas.
 - Cada planeta tem ~ 7–8 pistas no original; começamos por Chem VI completo.
@@ -163,8 +171,8 @@ Enquanto isso, `chem6-1` é uma pista provisória no estilo de Chem VI.
 | 2 ✅ | Formato de pista em tiles + gerador + rampas/saltos + checkpoints/voltas | Correr voltas cronometradas |
 | 3 ✅ | 3 oponentes de IA (Rip, Shred, Viper Mackay) + posições + tela de resultado | Corrida completa de 4 carros |
 | 4 ✅ | Armas (laser/míssil, mina/óleo, nitro), dano, explosão, respawn, dinheiro e blindagem na pista, locutor | Corrida de combate |
-| 5 | Os 5 carros + upgrades + loja | Loop corrida → loja → corrida |
-| 6 | Campanha: planetas, divisões, pontos, personagens, save | Jogo completo de ponta a ponta |
+| 5 ✅ | Os 5 carros + melhorias (motor, pneus, suspensão, blindagem) + cargas extras + loja com troca | Loop corrida → loja → corrida |
+| 6 ✅ | Campanha: 6 planetas × Divisões B/A, pontos, 6 pilotos, save automático + senha | Jogo completo de ponta a ponta |
 | 7 | Pistas de todos os planetas + editor de pistas | Conteúdo completo |
 | 8 | HUD final, minimapa, retrovisor, locutor, música, menus | Apresentação |
 | 9 | Split‑screen 2 jogadores + gamepad | Multiplayer local |

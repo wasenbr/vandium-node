@@ -15,6 +15,14 @@ npm run build    # gera a versão estática em dist/
 Para jogar no celular: rode `npm run dev` no PC e abra no celular o endereço "Network" que aparece
 no terminal (mesmo Wi‑Fi). O `dist/` pode ser publicado em qualquer hospedagem estática.
 
+## Modos
+
+- **Campanha:** escolha um dos 6 pilotos, comece em Chem VI (Divisão B) com um Dirt Devil e
+  suba até Inferno. Entre as corridas, a garagem mostra a próxima pista e os rivais; na loja você
+  compra carros (com troca), melhorias e cargas extras de armas. O progresso é salvo no navegador
+  e pode ser levado para outro aparelho com a **senha**.
+- **Corrida rápida:** qualquer uma das 12 pistas, com qualquer carro.
+
 ## Controles
 
 | | Teclado | Controle | Celular |

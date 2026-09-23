@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { CHEM6_OPPONENTS } from '../data/drivers';
 import { TRACKS } from '../data/tracks';
 import { VEHICLES } from '../data/vehicles';
+import { newCampaign, opponentsFor } from './campaign';
 import { emptyInput } from './input';
 import { Track } from './track';
 import { createWorld, stepWorld, type RacerEntry } from './world';
@@ -10,7 +10,7 @@ const DT = 1 / 60;
 const track = new Track(TRACKS[0]);
 
 function aiEntries(): RacerEntry[] {
-  return CHEM6_OPPONENTS.map((o) => ({ name: o.name, color: o.color, spec: VEHICLES[o.vehicleId], ai: o.ai }));
+  return opponentsFor(newCampaign('jake', 0), VEHICLES);
 }
 
 describe('mundo da corrida', () => {
@@ -25,6 +25,15 @@ describe('mundo da corrida', () => {
     const winner = world.racers.find((r) => r.finishPlace === 1)!;
     expect(winner.money).toBeGreaterThanOrEqual(20000);
   });
+
+  for (const def of TRACKS) {
+    it(`a CPU completa 2 voltas em ${def.id}`, () => {
+      const w = createWorld(new Track(def), aiEntries(), 2, 3);
+      w.started = true;
+      for (let i = 0; i < 60 * 300 && w.finishedCount < 3; i++) stepWorld(w, {}, DT);
+      expect(w.finishedCount).toBe(3);
+    });
+  }
 
   it('é determinístico: mesma semente, mesmo resultado', () => {
     const run = () => {

@@ -20,6 +20,8 @@ export interface TrackDef {
   laps: number;
   /** Peças separadas por espaço, ex.: "F S S R S L ..." */
   layout: string;
+  /** poças de gosma (deixam o carro lento), espalhadas pelas retas */
+  slime?: number;
 }
 
 export const TILE = 16;

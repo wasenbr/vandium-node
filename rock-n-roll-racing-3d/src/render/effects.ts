@@ -136,6 +136,16 @@ export class Effects {
     polygonOffset: true,
     polygonOffsetFactor: -2,
   });
+  private slimeMat = new THREE.MeshStandardMaterial({
+    color: 0x3a9a10,
+    emissive: 0x143a04,
+    roughness: 0.15,
+    metalness: 0.2,
+    transparent: true,
+    opacity: 0.9,
+    polygonOffset: true,
+    polygonOffsetFactor: -2,
+  });
   private coinGeo = new THREE.CylinderGeometry(0.7, 0.7, 0.14, 24).rotateX(Math.PI / 2);
   private coinMat: THREE.Material[];
   private armorMat = new THREE.MeshStandardMaterial({ color: 0x20c060, emissive: 0x0a6a2a, metalness: 0.4, roughness: 0.3 });
@@ -280,6 +290,12 @@ export class Effects {
       this.hazards,
       world.hazards,
       (h: Hazard) => {
+        if (h.kind === 'slime') {
+          const m = new THREE.Mesh(this.oilGeo, this.slimeMat);
+          m.scale.set(2.3, 1, 1.9);
+          m.rotation.y = h.id;
+          return m;
+        }
         if (h.kind === 'oil') {
           const m = new THREE.Mesh(this.oilGeo, this.oilMat);
           m.scale.setScalar(0.3);
@@ -294,7 +310,9 @@ export class Effects {
         return g;
       },
       (o, h: Hazard) => {
-        if (h.kind === 'oil') {
+        if (h.kind === 'slime') {
+          o.position.set(h.x, h.y + 0.03, h.z);
+        } else if (h.kind === 'oil') {
           // a mancha se espalha nos primeiros instantes
           const r = 2.4 * Math.min(1, 0.3 + h.age * 2.5);
           o.scale.set(r, 1, r * 0.85);

@@ -3,9 +3,14 @@ import { Announcer, LINES } from '../audio/announcer';
 import { toggleMute, unlockAudio } from '../audio/context';
 import { EngineSound } from '../audio/engine';
 import { sfxBump, sfxDrop, sfxExplosion, sfxHit, sfxLaser, sfxMissile, sfxPickup } from '../audio/sfx';
-import { CHEM6_OPPONENTS } from '../data/drivers';
-import { TRACKS } from '../data/tracks';
+import { trackById, TRACKS } from '../data/tracks';
 import { VEHICLES } from '../data/vehicles';
+import {
+  applyRaceResult, currentPlanet, currentTrackId, decodeSave, DIVISIONS, encodeSave, newCampaign, opponentsFor, PLANETS, playerSpec, prizesFor,
+  type CampaignState,
+} from '../sim/campaign';
+import { buildSpec, CAR_PRICES, CHARACTERS, chargePrice, newCarSetup, tradeInValue, upgradePrice } from '../sim/garage';
+import { loadCampaign, loadPrefs, saveCampaign, savePrefs } from './storage';
 import { Controls, createTouchControls, isTouchDevice } from '../input/controls';
 import { CAMERA_LABELS, CameraRig, type CameraMode } from '../render/cameras';
 import { createCarMesh, type CarVisual } from '../render/carMesh';
@@ -17,11 +22,12 @@ import { THEMES } from '../render/themes';
 import { buildTrackMesh, canvasTexture } from '../render/trackMesh';
 import { emptyInput, type ControlInput } from '../sim/input';
 import { clamp, lerp, lerpAngle } from '../sim/math';
-import { Track } from '../sim/track';
-import { forwardSpeed, type VehicleState } from '../sim/vehicle';
+import { Track, type TrackDef } from '../sim/track';
+import { forwardSpeed, type VehicleSpec, type VehicleState } from '../sim/vehicle';
 import { createWorld, PRIZES, stepWorld, type Racer, type RacerEntry, type World, type WorldEvent } from '../sim/world';
+import type { AiProfile } from '../sim/ai';
 import { Hud, formatTime } from '../ui/hud';
-import { Menus, WEAPON_LABEL, type ResultRow } from '../ui/menus';
+import { Menus, WEAPON_LABEL, type CampaignReport, type HubData, type ResultRow } from '../ui/menus';
 
 const DT = 1 / 60;
 const COUNTDOWN = 3;
@@ -39,6 +45,17 @@ interface Snapshot {
 
 const snap = (v: VehicleState): Snapshot => ({ x: v.x, y: v.y, z: v.z, heading: v.heading, pitch: v.pitch, roll: v.roll });
 const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+
+/** Tudo que define uma corrida antes da largada. */
+interface RaceSetup {
+  mode: 'quick' | 'campaign';
+  trackId: string;
+  opponents: { name: string; color: number; spec: VehicleSpec; ai: AiProfile }[];
+  playerName: string;
+  playerColor: number;
+  playerSpec: VehicleSpec;
+  prizes: number[];
+}
 
 interface CarView {
   visual: CarVisual;
@@ -67,13 +84,17 @@ export class Game {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private rig = new CameraRig();
-  private track: Track;
+  private track!: Track;
   private world!: World;
+  private setup!: RaceSetup;
+  private campaign: CampaignState | null = null;
+  private level: THREE.Group | null = null;
+  private hemi: THREE.HemisphereLight;
+  private resultsShown = false;
+  private prefs = loadPrefs({ camera: 'iso' as CameraMode });
   private playerId = 0;
   private views: CarView[] = [];
   private effects = new Effects();
-  private vehicleId = 'marauder';
-  private carColor = 0x2f7bff;
   private sun: THREE.DirectionalLight;
   private hud: Hud;
   private menus: Menus;
@@ -96,7 +117,7 @@ export class Game {
   private readonly shadows: boolean;
   private postfx: PostFx | null = null;
   private animated: ((t: number) => void)[] = [];
-  private sky: THREE.Mesh;
+  private sky: THREE.Mesh | null = null;
   private clock = 0;
 
   constructor(private root: HTMLElement) {
@@ -109,16 +130,10 @@ export class Game {
     this.renderer.toneMappingExposure = 1.05;
     root.appendChild(this.renderer.domElement);
 
-    const def = TRACKS[0];
-    this.track = new Track(def);
-    const theme = THEMES[def.theme];
     this.scene.environment = buildEnvironment(this.renderer);
     this.scene.environmentIntensity = 0.45;
-    this.sky = buildSky(theme);
-    this.scene.add(this.sky);
-    this.scene.fog = new THREE.Fog(theme.fog, 110, 380);
-    this.scene.add(new THREE.HemisphereLight(theme.ambientSky, theme.ambientGround, 0.9));
-    this.sun = new THREE.DirectionalLight(theme.sun, theme.sunIntensity);
+    this.hemi = new THREE.HemisphereLight(0xffffff, 0x202020, 0.9);
+    this.sun = new THREE.DirectionalLight(0xffffff, 2.5);
     this.sun.castShadow = this.shadows;
     this.sun.shadow.mapSize.set(2048, 2048);
     this.sun.shadow.bias = -0.0004;
@@ -128,35 +143,17 @@ export class Game {
     sc.right = sc.top = 50;
     sc.near = 1;
     sc.far = 220;
-    this.scene.add(this.sun, this.sun.target);
-    const ground = buildGround(this.track, theme, this.shadows);
-    this.scene.add(ground.mesh);
-    this.scene.add(buildTrackMesh(this.track, theme, this.shadows));
-    const scenery = buildScenery(this.track, theme, this.shadows);
-    this.scene.add(scenery.group);
-    this.scene.add(this.effects.group);
-    this.animated.push(ground.update, scenery.update);
+    this.scene.add(this.hemi, this.sun, this.sun.target, this.effects.group);
     // bloom só no PC: no celular pesa demais
     if (!this.touch) this.postfx = new PostFx(this.renderer, this.scene);
 
-    this.hud = new Hud(root, this.track);
+    this.hud = new Hud(root);
     this.hud.setVisible(false);
     if (this.touch) this.touchEl = createTouchControls(root, this.controls);
-    this.menus = new Menus(root, {
-      vehicles: Object.values(VEHICLES),
-      onStart: (opts) => {
-        unlockAudio();
-        this.engine.start();
-        if (this.touch) this.enterFullscreen();
-        this.vehicleId = opts.vehicleId;
-        this.carColor = opts.color;
-        this.rig.mode = opts.camera;
-        this.startRace();
-      },
-      onResume: () => this.togglePause(),
-      onRestart: () => this.startRace(),
-      onMenu: () => this.toMenu(),
-    });
+    this.rig.mode = this.prefs.camera;
+    this.menus = new Menus(root, this.menuActions(), VEHICLES, TRACKS);
+    this.menus.setCameraChoice(this.prefs.camera);
+    this.campaign = loadCampaign();
 
     this.controls.onUiAction((a) => {
       if (a === 'camera' && this.phase !== 'menu') this.setCamera(this.rig.cycle());
@@ -168,9 +165,11 @@ export class Game {
       if (document.hidden && (this.phase === 'racing' || this.phase === 'countdown')) this.togglePause();
     });
 
+    // cenário de fundo do menu: a primeira pista, com os carros parados no grid
+    this.setup = this.quickSetup({ trackId: TRACKS[0].id, vehicleId: 'marauder', color: 0x2f7bff });
     this.createRace();
     this.resize();
-    this.menus.showMain();
+    this.menus.showMain(!!this.campaign);
     requestAnimationFrame((t) => this.frame(t));
   }
 
@@ -187,23 +186,97 @@ export class Game {
     return this.world.racers[this.playerId];
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Pistas e temas                                                       */
+  /* ------------------------------------------------------------------ */
+
+  /** Monta a pista, o cenário e a iluminação do planeta. Reaproveita se já estiver carregada. */
+  private loadTrack(def: TrackDef): void {
+    if (this.track?.def.id === def.id) return;
+    this.track = new Track(def);
+    const theme = THEMES[def.theme];
+    if (this.level) {
+      this.scene.remove(this.level);
+      this.level.traverse((o) => {
+        const m = o as THREE.Mesh;
+        m.geometry?.dispose();
+        const mats = Array.isArray(m.material) ? m.material : m.material ? [m.material] : [];
+        for (const mat of mats) {
+          for (const v of Object.values(mat)) if (v instanceof THREE.Texture) v.dispose();
+          mat.dispose();
+        }
+      });
+    }
+    this.level = new THREE.Group();
+    this.sky = buildSky(theme);
+    this.level.add(this.sky);
+    this.scene.fog = new THREE.Fog(theme.fog, 110, 380);
+    this.hemi.color.set(theme.ambientSky);
+    this.hemi.groundColor.set(theme.ambientGround);
+    this.sun.color.set(theme.sun);
+    this.sun.intensity = theme.sunIntensity;
+    const ground = buildGround(this.track, theme, this.shadows);
+    const scenery = buildScenery(this.track, theme, def.theme, this.shadows, def.id.length * 7 + 3);
+    this.level.add(ground.mesh, buildTrackMesh(this.track, theme, this.shadows), scenery.group);
+    this.animated = [ground.update, scenery.update];
+    this.scene.add(this.level);
+    this.hud.setTrack(this.track);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Montagem da corrida                                                  */
+  /* ------------------------------------------------------------------ */
+
+  /** Corrida rápida: rivais do planeta da pista, com carros do mesmo nível que o seu. */
+  private quickSetup(o: { trackId: string; vehicleId: string; color: number }): RaceSetup {
+    const def = trackById(o.trackId);
+    const s = newCampaign(CHARACTERS[1].id, o.color);
+    s.planet = Math.max(0, PLANETS.findIndex((p) => p.theme === def.theme));
+    const car = newCarSetup(o.vehicleId);
+    const level = Math.min(3, Math.floor((s.planet * 2) / 3));
+    car.upgrades = { engine: level, tires: level, shocks: level, armor: level };
+    return {
+      mode: 'quick',
+      trackId: def.id,
+      opponents: opponentsFor(s, VEHICLES),
+      playerName: 'Você',
+      playerColor: o.color,
+      playerSpec: buildSpec(VEHICLES[o.vehicleId], car),
+      prizes: PRIZES,
+    };
+  }
+
+  private campaignSetup(c: CampaignState): RaceSetup {
+    return {
+      mode: 'campaign',
+      trackId: currentTrackId(c),
+      opponents: opponentsFor(c, VEHICLES),
+      playerName: 'Você',
+      playerColor: c.color,
+      playerSpec: playerSpec(c, VEHICLES),
+      prizes: prizesFor(c),
+    };
+  }
+
   /** Monta o grid: os 3 rivais largam na frente, o jogador por último (como no original). */
   private createRace(): void {
-    const used = new Set([this.carColor]);
-    const spare = [0xe02828, 0xf2c318, 0xb040e0, 0x2f7bff, 0xf0f0f0];
-    const entries: RacerEntry[] = CHEM6_OPPONENTS.map((o) => {
+    const setup = this.setup;
+    this.loadTrack(trackById(setup.trackId));
+    const used = new Set([setup.playerColor]);
+    const spare = [0xe02828, 0xf2c318, 0xb040e0, 0x2f7bff, 0xf0f0f0, 0x2fc840];
+    const entries: RacerEntry[] = setup.opponents.map((o) => {
       let color = o.color;
       if (used.has(color)) color = spare.find((c) => !used.has(c)) ?? color;
       used.add(color);
-      return { name: o.name, color, spec: VEHICLES[o.vehicleId], ai: o.ai };
+      return { name: o.name, color, spec: o.spec, ai: o.ai };
     });
     // ?autopilot na URL: o carro do jogador é pilotado pela IA (demonstração/testes)
     const autopilot = new URLSearchParams(location.search).has('autopilot') ? { skill: 0.85, aggression: 0.8, lane: 0.5 } : null;
-    entries.push({ name: 'Você', color: this.carColor, spec: VEHICLES[this.vehicleId], ai: autopilot });
+    entries.push({ name: setup.playerName, color: setup.playerColor, spec: setup.playerSpec, ai: autopilot });
     this.playerId = entries.length - 1;
     // ?laps=N na URL muda o número de voltas (útil para testar)
     const laps = Number(new URLSearchParams(location.search).get('laps')) || this.track.def.laps;
-    this.world = createWorld(this.track, entries, laps, (Date.now() & 0xffff) + 1);
+    this.world = createWorld(this.track, entries, laps, (Date.now() & 0xffff) + 1, setup.prizes);
 
     for (const v of this.views) {
       this.scene.remove(v.visual.root);
@@ -228,6 +301,7 @@ export class Game {
     this.countdown = COUNTDOWN;
     this.phase = 'countdown';
     this.resultsTimer = 0;
+    this.resultsShown = false;
     this.menus.hideAll();
     this.hud.setVisible(true);
     this.hud.setLap(1, this.world.laps);
@@ -237,8 +311,9 @@ export class Game {
   private toMenu(): void {
     this.phase = 'menu';
     this.engine.silence();
+    window.speechSynthesis?.cancel();
     this.hud.setVisible(false);
-    this.menus.showMain();
+    this.menus.showMain(!!this.campaign);
   }
 
   private togglePause(): void {
@@ -345,7 +420,7 @@ export class Game {
 
     if (this.phase === 'finished') {
       this.resultsTimer -= dt;
-      if (this.resultsTimer <= 0 && this.resultsTimer > -dt * 1.5) this.showResults();
+      if (this.resultsTimer <= 0) this.showResults();
     }
 
     // efeitos de impacto no carro do jogador
@@ -456,19 +531,143 @@ export class Game {
   }
 
   private showResults(): void {
+    if (this.resultsShown) return;
+    this.resultsShown = true;
     const order = [...this.world.racers].sort((a, b) => a.place - b.place);
     const rows: ResultRow[] = order.map((r) => ({
       place: r.place,
-      name: r.id === this.playerId ? 'Você' : r.name,
+      name: r.id === this.playerId ? this.setup.playerName : r.name,
       color: hex(r.color),
       time: r.finishPlace ? r.progress.finishTime : null,
       kills: r.kills,
-      prize: PRIZES[r.place - 1] ?? 0,
+      prize: this.world.prizes[r.place - 1] ?? 0,
       money: r.money,
       me: r.id === this.playerId,
     }));
+    let report: CampaignReport | null = null;
+    if (this.setup.mode === 'campaign' && this.campaign) {
+      const p = this.player;
+      const res = applyRaceResult(this.campaign, p.place, p.money, p.kills);
+      saveCampaign(this.campaign);
+      report = { outcome: res.outcome, pointsEarned: res.pointsEarned, points: this.campaign.points, label: this.campaignLabel() };
+    }
     this.hud.clearMessage();
-    this.menus.showResults(rows, this.player.progress.lapTimes);
+    this.menus.showResults(rows, this.player.progress.lapTimes, report);
+  }
+
+  /* ------------------------------------------------------------------ */
+  /* Campanha, garagem e loja                                             */
+  /* ------------------------------------------------------------------ */
+
+  private campaignLabel(): string {
+    const c = this.campaign!;
+    return `${currentPlanet(c).name} — Divisão ${DIVISIONS[c.division]}`;
+  }
+
+  private hubData(): HubData {
+    const c = this.campaign!;
+    return {
+      state: c,
+      planet: currentPlanet(c),
+      track: new Track(trackById(currentTrackId(c))),
+      opponents: opponentsFor(c, VEHICLES),
+      spec: playerSpec(c, VEHICLES),
+      character: CHARACTERS.find((ch) => ch.id === c.characterId) ?? CHARACTERS[0],
+      vehicles: VEHICLES,
+    };
+  }
+
+  /** Mostra a garagem com a próxima pista já montada ao fundo. */
+  private toHub(notice = ''): void {
+    const c = this.campaign!;
+    this.phase = 'menu';
+    this.engine.silence();
+    window.speechSynthesis?.cancel();
+    this.hud.setVisible(false);
+    this.setup = this.campaignSetup(c);
+    this.createRace();
+    this.menus.showHub(this.hubData(), notice);
+  }
+
+  private buy(price: number | null, apply: () => void, label: string): void {
+    const c = this.campaign!;
+    if (price === null || price > c.money) return;
+    c.money -= price;
+    apply();
+    saveCampaign(c);
+    sfxPickup('money');
+    this.menus.showShop(this.hubData(), `✔ ${label} comprado(a)!`);
+  }
+
+  private menuActions() {
+    const beginAudio = () => {
+      unlockAudio();
+      this.engine.start();
+      if (this.touch) this.enterFullscreen();
+    };
+    return {
+      quickRace: (o: { trackId: string; vehicleId: string; color: number }) => {
+        beginAudio();
+        this.setup = this.quickSetup(o);
+        this.startRace();
+      },
+      newCampaign: (characterId: string, color: number) => {
+        beginAudio();
+        this.campaign = newCampaign(characterId, color);
+        saveCampaign(this.campaign);
+        this.toHub(`Bem-vindo a ${this.campaignLabel()}! Você tem um Dirt Devil e $10.000 — passe na loja.`);
+      },
+      continueCampaign: () => {
+        beginAudio();
+        if (this.campaign) this.toHub();
+      },
+      loadPassword: (code: string) => {
+        const c = decodeSave(code);
+        if (!c) return false;
+        beginAudio();
+        this.campaign = c;
+        saveCampaign(c);
+        this.toHub('Campanha carregada pela senha.');
+        return true;
+      },
+      campaignRace: () => {
+        beginAudio();
+        this.startRace();
+      },
+      openShop: () => this.menus.showShop(this.hubData()),
+      buyCar: (id: string) => {
+        const c = this.campaign!;
+        const price = Math.max(0, CAR_PRICES[id].price - tradeInValue(c.car));
+        this.buy(price, () => (c.car = newCarSetup(id)), VEHICLES[id].name);
+      },
+      buyUpgrade: (kind: 'engine' | 'tires' | 'shocks' | 'armor') => {
+        const c = this.campaign!;
+        this.buy(upgradePrice(c.car, kind), () => c.car.upgrades[kind]++, 'Melhoria');
+      },
+      buyCharge: (kind: 'front' | 'rear' | 'nitro') => {
+        const c = this.campaign!;
+        this.buy(chargePrice(c.car, kind), () => c.car.charges[kind]++, 'Carga extra');
+      },
+      showPassword: () => this.menus.showPassword(encodeSave(this.campaign!)),
+      backToHub: () => this.toHub(),
+      resume: () => this.togglePause(),
+      restart: () => this.startRace(),
+      quit: () => (this.setup.mode === 'campaign' && this.campaign ? this.toHub('Corrida abandonada — não contou para a temporada.') : this.toMenu()),
+      resultsContinue: () => {
+        const c = this.campaign!;
+        if (c.champion) {
+          this.toMenu();
+          return;
+        }
+        this.toHub();
+      },
+      toMain: () => this.toMenu(),
+      setCamera: (mode: CameraMode) => {
+        this.prefs.camera = mode;
+        savePrefs(this.prefs);
+        this.setCamera(mode, false);
+      },
+    };
   }
 
   private render(alpha: number, frameDt: number, simulating: boolean): void {
@@ -530,7 +729,7 @@ export class Game {
 
     this.sun.position.set(pose.x + 40, pose.y + 70, pose.z - 30);
     this.sun.target.position.set(pose.x, pose.y, pose.z);
-    this.sky.position.copy(this.rig.active.position);
+    this.sky?.position.copy(this.rig.active.position);
 
     const r = this.player;
     const speed = forwardSpeed(pc);

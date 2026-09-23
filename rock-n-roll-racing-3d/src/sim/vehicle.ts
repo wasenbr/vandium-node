@@ -29,6 +29,10 @@ export interface VehicleSpec {
   frontCharges: number;
   rear: RearWeapon;
   rearCharges: number;
+  /** fração máxima de velocidade perdida ao pousar de um salto (suspensão melhor = menos) */
+  landingLoss?: number;
+  /** 0..1 — resistência a rodar no óleo (suspensão) */
+  spinResist?: number;
 }
 
 export type FrontWeapon = 'laser' | 'missile';
@@ -197,7 +201,7 @@ export function stepVehicle(v: VehicleState, spec: VehicleSpec, input: ControlIn
       v.y = groundH;
       v.vy = 0;
       v.grounded = true;
-      const k = 1 - clamp(v.landingImpact / 60, 0, 0.25);
+      const k = 1 - clamp(v.landingImpact / 60, 0, spec.landingLoss ?? 0.25);
       v.vx *= k;
       v.vz *= k;
     }

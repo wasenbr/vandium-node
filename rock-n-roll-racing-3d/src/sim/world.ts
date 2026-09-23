@@ -11,9 +11,10 @@ export const WEAPONS = {
   missile: { speed: 60, life: 2.4, damage: 30, knock: 9, hop: 7, turnRate: 1.8 },
   mine: { damage: 32, hop: 9, radius: 1.7, armTime: 0.6, life: 45 },
   oil: { radius: 2.4, life: 25, spinTime: 1.0 },
+  slime: { radius: 2.3, drag: 2.6 },
 } as const;
 
-export const PRIZES = [20000, 12000, 6000, 0];
+export const PRIZES = [20000, 12000, 6000, 2000];
 export const PICKUP_MONEY = 1000;
 export const PICKUP_ARMOR = 40;
 const RESPAWN_TIME = 2.5;
@@ -42,6 +43,10 @@ export interface Racer extends RacerEntry {
   respawnTimer: number;
   invuln: number;
   spinTime: number;
+  /** duração total do giro atual (o carro sempre dá uma volta completa) */
+  spinTotal: number;
+  /** proteção após rodar no óleo, para não rodar de novo na mesma mancha */
+  oilGrace: number;
   prevFire: boolean;
   prevDrop: boolean;
   cooldown: number;
@@ -65,7 +70,7 @@ export interface Projectile {
 
 export interface Hazard {
   id: number;
-  kind: 'mine' | 'oil';
+  kind: 'mine' | 'oil' | 'slime';
   owner: number;
   x: number;
   y: number;
@@ -110,6 +115,8 @@ export interface World {
   events: WorldEvent[];
   rng: () => number;
   nextId: number;
+  /** prêmio em dinheiro por colocação */
+  prizes: number[];
 }
 
 /** Posições do grid: duas filas logo depois da linha, os primeiros da lista largam na frente. */
@@ -120,7 +127,7 @@ function gridSlot(track: Track, slot: number): { x: number; z: number; heading: 
   return { x: p.x + leftX(p.heading) * side * 2.5, z: p.z + leftZ(p.heading) * side * 2.5, heading: p.heading, h: p.h };
 }
 
-export function createWorld(track: Track, entries: RacerEntry[], laps: number, seed = 1): World {
+export function createWorld(track: Track, entries: RacerEntry[], laps: number, seed = 1, prizes: number[] = PRIZES): World {
   const racers: Racer[] = entries.map((e, i) => {
     const g = gridSlot(track, i);
     const car = createVehicleState(e.spec, g.x, g.z, g.heading, g.h);
@@ -139,6 +146,8 @@ export function createWorld(track: Track, entries: RacerEntry[], laps: number, s
       respawnTimer: 0,
       invuln: 0,
       spinTime: 0,
+      spinTotal: 1,
+      oilGrace: 0,
       prevFire: false,
       prevDrop: false,
       cooldown: 0,
@@ -167,12 +176,23 @@ export function createWorld(track: Track, entries: RacerEntry[], laps: number, s
     });
   }
 
+  // poças de gosma fixas (Drakonis e outros planetas), só em retas e fora da largada
+  const hazards: Hazard[] = [];
+  const spots = track.pieces.filter((p) => (p.code === 'S' || p.code === 'B') && p.index > 1);
+  const count = Math.min(track.def.slime ?? 0, spots.length);
+  for (let i = 0; i < count; i++) {
+    const p = spots[Math.floor(((i + 0.5) * spots.length) / count)];
+    const side = i % 2 === 0 ? 1 : -1;
+    const pt = track.pointAtDist(p.startDist + p.length / 2);
+    hazards.push({ id: id++, kind: 'slime', owner: -1, x: pt.x + leftX(pt.heading) * side * 2.2, y: pt.h, z: pt.z + leftZ(pt.heading) * side * 2.2, age: 0 });
+  }
+
   const world: World = {
     track,
     laps,
     racers,
     projectiles: [],
-    hazards: [],
+    hazards,
     pickups,
     started: false,
     raceTime: 0,
@@ -180,6 +200,7 @@ export function createWorld(track: Track, entries: RacerEntry[], laps: number, s
     events: [],
     rng: createRng(seed),
     nextId: 1,
+    prizes,
   };
   updatePlaces(world);
   return world;
@@ -345,13 +366,24 @@ function stepHazards(world: World, dt: number): void {
           }
         }
       }
+    } else if (h.kind === 'slime') {
+      for (const r of world.racers) {
+        if (!r.alive || !r.car.grounded) continue;
+        if (Math.hypot(r.car.x - h.x, r.car.z - h.z) < WEAPONS.slime.radius) {
+          const k = Math.exp(-WEAPONS.slime.drag * dt);
+          r.car.vx *= k;
+          r.car.vz *= k;
+        }
+      }
     } else {
       if (h.age > WEAPONS.oil.life) dead = true;
       else {
         for (const r of world.racers) {
-          if (!r.alive || !r.car.grounded || r.spinTime > 0 || (r.id === h.owner && h.age < 1.5)) continue;
+          if (!r.alive || !r.car.grounded || r.spinTime > 0 || r.oilGrace > 0 || (r.id === h.owner && h.age < 1.5)) continue;
           if (Math.hypot(r.car.x - h.x, r.car.z - h.z) < WEAPONS.oil.radius && forwardSpeed(r.car) > 8) {
-            r.spinTime = WEAPONS.oil.spinTime;
+            r.spinTime = WEAPONS.oil.spinTime * (1 - (r.spec.spinResist ?? 0));
+            r.spinTotal = r.spinTime;
+            r.oilGrace = r.spinTime + 1.2;
             world.events.push({ type: 'spin', racer: r.id });
           }
         }
@@ -428,6 +460,7 @@ export function stepWorld(world: World, humanInputs: Record<number, ControlInput
   for (const r of world.racers) {
     r.cooldown = Math.max(0, r.cooldown - dt);
     r.invuln = Math.max(0, r.invuln - dt);
+    r.oilGrace = Math.max(0, r.oilGrace - dt);
 
     if (!r.alive) {
       r.respawnTimer -= dt;
@@ -446,7 +479,7 @@ export function stepWorld(world: World, humanInputs: Record<number, ControlInput
       // derrapando no óleo: perde aderência e gira
       r.spinTime -= dt;
       spec = { ...spec, grip: 0.6 };
-      r.car.heading += 7 * dt * (r.id % 2 === 0 ? 1 : -1);
+      r.car.heading += ((Math.PI * 2) / r.spinTotal) * dt * (r.id % 2 === 0 ? 1 : -1);
       input = { ...input, throttle: 0, steer: 0, nitro: false };
     }
     r.lastInput = input;
@@ -475,7 +508,7 @@ export function stepWorld(world: World, humanInputs: Record<number, ControlInput
         world.events.push({ type: 'lap', racer: r.id, lap: ev.lap });
       } else if (ev?.type === 'finish') {
         r.finishPlace = ++world.finishedCount;
-        r.money += PRIZES[r.finishPlace - 1] ?? 0;
+        r.money += world.prizes[r.finishPlace - 1] ?? 0;
         world.events.push({ type: 'finish', racer: r.id, place: r.finishPlace });
       }
     }

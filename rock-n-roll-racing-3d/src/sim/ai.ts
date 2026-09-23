@@ -18,13 +18,15 @@ export interface AiState {
   lane: number;
   stuckTime: number;
   reverseTime: number;
+  /** +1 = sai de frente, -1 = sai de ré */
+  recoverDir: number;
   wantFire: boolean;
   wantDrop: boolean;
   wantNitro: boolean;
 }
 
 export function createAiState(): AiState {
-  return { thinkTimer: 0, lane: 0, stuckTime: 0, reverseTime: 0, wantFire: false, wantDrop: false, wantNitro: false };
+  return { thinkTimer: 0, lane: 0, stuckTime: 0, reverseTime: 0, recoverDir: -1, wantFire: false, wantDrop: false, wantNitro: false };
 }
 
 /** Posição de um ponto em coordenadas da pista: distância ao longo dela e deslocamento lateral. */
@@ -51,19 +53,32 @@ export function computeAiInput(world: World, r: Racer, dt: number): ControlInput
   const speed = forwardSpeed(car);
   const me = trackCoords(world, car.x, car.z, car.pieceIndex);
 
-  // Preso contra a parede ou outro carro: dá ré um pouco
+  // Preso ou virado de lado: manobra até alinhar com a pista. Se o bico aponta para o meio
+  // da pista, sai de frente; se aponta para a mureta, sai de ré.
+  const tangent = track.pointAtDist(me.dist).heading;
+  const err = wrapAngle(tangent - car.heading);
   if (st.reverseTime > 0) {
     st.reverseTime -= dt;
-    input.brake = 1;
-    const tangent = track.pointAtDist(me.dist).heading;
-    input.steer = clamp(wrapAngle(tangent - car.heading) * 2, -1, 1);
+    if (Math.abs(err) < 0.35 && st.reverseTime < 1.6) st.reverseTime = 0;
+    if (st.recoverDir > 0) {
+      input.throttle = 0.7;
+      input.steer = clamp(-err * 3, -1, 1);
+    } else {
+      input.brake = 1;
+      input.steer = clamp(err * 3, -1, 1);
+    }
     return input;
   }
+  if (r.spinTime > 0) return input; // rodando no óleo: nada a fazer
   if (Math.abs(speed) < 2.5) st.stuckTime += dt;
   else st.stuckTime = 0;
-  if (st.stuckTime > 1.5) {
+  if (st.stuckTime > 0.8 || (Math.abs(err) > 1.6 && Math.abs(speed) < 6)) {
     st.stuckTime = 0;
-    st.reverseTime = 0.9;
+    st.reverseTime = 2.2;
+    // o bico aponta para o centro da pista?
+    const noseLateral = Math.sin(car.heading - tangent);
+    const towardCenter = Math.abs(me.lateral) < 1.5 ? Math.abs(err) < Math.PI / 2 : Math.sign(noseLateral) === -Math.sign(me.lateral);
+    st.recoverDir = towardCenter ? 1 : -1;
   }
 
   // "Pensa" algumas vezes por segundo: escolhe faixa, decide armas

@@ -1,4 +1,5 @@
 import type { Track } from '../sim/track';
+import { drawTrack, trackTransform } from './trackMap';
 
 export function formatTime(t: number): string {
   const m = Math.floor(t / 60);
@@ -44,7 +45,7 @@ export class Hud {
   private toastTimer = 0;
   private centerTimer = 0;
 
-  constructor(root: HTMLElement, track: Track) {
+  constructor(root: HTMLElement) {
     this.el = document.createElement('div');
     this.el.className = 'hud';
     this.el.innerHTML = `
@@ -80,46 +81,18 @@ export class Hud {
     this.minimap = q('.hud-map') as HTMLCanvasElement;
     this.mapCtx = this.minimap.getContext('2d')!;
 
-    // desenha o traçado da pista uma vez só
-    // girado 45° para bater com a orientação da vista aérea
-    const rot = (x: number, z: number): [number, number] => [(z - x) * Math.SQRT1_2, -(x + z) * Math.SQRT1_2];
-    const pts = track.sampleCenterline(2);
-    let minU = Infinity, maxU = -Infinity, minV = Infinity, maxV = -Infinity;
-    for (const p of pts) {
-      const [u, v] = rot(p.x, p.z);
-      minU = Math.min(minU, u);
-      maxU = Math.max(maxU, u);
-      minV = Math.min(minV, v);
-      maxV = Math.max(maxV, v);
-    }
-    const size = this.minimap.width;
-    const pad = 14;
-    const scale = (size - pad * 2) / Math.max(maxU - minU, maxV - minV);
-    const offU = (size - (maxU - minU) * scale) / 2;
-    const offV = (size - (maxV - minV) * scale) / 2;
-    this.mapTransform = (x, z) => {
-      const [u, v] = rot(x, z);
-      return [offU + (u - minU) * scale, offV + (v - minV) * scale];
-    };
     this.mapBase = document.createElement('canvas');
-    this.mapBase.width = this.mapBase.height = size;
+    this.mapBase.width = this.mapBase.height = this.minimap.width;
+    this.mapTransform = () => [0, 0];
+  }
+
+  /** Troca a pista mostrada no minimapa. */
+  setTrack(track: Track): void {
+    const size = this.minimap.width;
+    this.mapTransform = trackTransform(track, size, size, 14);
     const ctx = this.mapBase.getContext('2d')!;
-    ctx.lineJoin = 'round';
-    for (const [w, c] of [[9, 'rgba(0,0,0,0.6)'], [5, '#cfcfe0']] as const) {
-      ctx.beginPath();
-      pts.forEach((p, i) => {
-        const [x, y] = this.mapTransform(p.x, p.z);
-        if (i === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.closePath();
-      ctx.lineWidth = w;
-      ctx.strokeStyle = c;
-      ctx.stroke();
-    }
-    const [sx, sy] = this.mapTransform(track.pieces[0].x0, track.pieces[0].z0);
-    ctx.fillStyle = '#fff';
-    ctx.fillRect(sx - 4, sy - 4, 8, 8);
+    ctx.clearRect(0, 0, size, size);
+    drawTrack(ctx, track, this.mapTransform);
   }
 
   setLap(lap: number, laps: number): void {
