@@ -173,8 +173,9 @@ function warningTexture(text: string): THREE.CanvasTexture {
   });
 }
 
-const RAIL_HEIGHT = 0.9;
-const RAIL_THICK = 0.35;
+// muretas baixas e grossas, em blocos: não escondem os carros na vista isométrica
+const RAIL_HEIGHT = 0.55;
+const RAIL_THICK = 0.7;
 
 /** Ponto de um perfil transversal: deslocamento lateral e altura (relativa à pista ou absoluta). */
 interface ProfilePoint {

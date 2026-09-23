@@ -3,7 +3,7 @@ import { emptyInput, type ControlInput } from './input';
 import { clamp, createRng, forwardX, forwardZ, leftX, leftZ, wrapAngle } from './math';
 import { createProgress, updateProgress, type RacerProgress } from './race';
 import type { Track } from './track';
-import { createVehicleState, forwardSpeed, stepVehicle, type VehicleSpec, type VehicleState } from './vehicle';
+import { CAR_SCALE, createVehicleState, forwardSpeed, stepVehicle, type VehicleSpec, type VehicleState } from './vehicle';
 
 /** Parâmetros das armas (dano em pontos de blindagem). */
 export const WEAPONS = {
@@ -19,7 +19,7 @@ export const PICKUP_MONEY = 1000;
 export const PICKUP_ARMOR = 40;
 const RESPAWN_TIME = 2.5;
 const INVULN_TIME = 2;
-const CAR_RADIUS = 1.25;
+const CAR_RADIUS = 1.25 * CAR_SCALE;
 
 export interface RacerEntry {
   name: string;
@@ -124,7 +124,8 @@ function gridSlot(track: Track, slot: number): { x: number; z: number; heading: 
   const row = Math.floor(slot / 2);
   const side = slot % 2 === 0 ? 1 : -1;
   const p = track.pointAtDist(3 + (3 - row) * 7);
-  return { x: p.x + leftX(p.heading) * side * 2.5, z: p.z + leftZ(p.heading) * side * 2.5, heading: p.heading, h: p.h };
+  const lat = track.halfWidth * 0.45;
+  return { x: p.x + leftX(p.heading) * side * lat, z: p.z + leftZ(p.heading) * side * lat, heading: p.heading, h: p.h };
 }
 
 export function createWorld(track: Track, entries: RacerEntry[], laps: number, seed = 1, prizes: number[] = PRIZES): World {
@@ -164,7 +165,7 @@ export function createWorld(track: Track, entries: RacerEntry[], laps: number, s
   for (let i = 1; i < n; i++) {
     const p = track.pointAtDist((i * track.totalLength) / n);
     const side = i % 2 === 0 ? 1 : -1;
-    const lat = side * 2.6;
+    const lat = side * track.halfWidth * 0.5;
     pickups.push({
       id: id++,
       kind: i % 4 === 0 ? 'armor' : 'money',
@@ -184,7 +185,7 @@ export function createWorld(track: Track, entries: RacerEntry[], laps: number, s
     const p = spots[Math.floor(((i + 0.5) * spots.length) / count)];
     const side = i % 2 === 0 ? 1 : -1;
     const pt = track.pointAtDist(p.startDist + p.length / 2);
-    hazards.push({ id: id++, kind: 'slime', owner: -1, x: pt.x + leftX(pt.heading) * side * 2.2, y: pt.h, z: pt.z + leftZ(pt.heading) * side * 2.2, age: 0 });
+    hazards.push({ id: id++, kind: 'slime', owner: -1, x: pt.x + leftX(pt.heading) * side * track.halfWidth * 0.4, y: pt.h, z: pt.z + leftZ(pt.heading) * side * track.halfWidth * 0.4, age: 0 });
   }
 
   const world: World = {
@@ -262,8 +263,8 @@ function fire(world: World, r: Racer): void {
   const fz = forwardZ(car.heading);
   const w = WEAPONS[kind];
   const base = Math.max(0, forwardSpeed(car));
-  const x = car.x + fx * 2.8;
-  const z = car.z + fz * 2.8;
+  const x = car.x + fx * 2.8 * CAR_SCALE;
+  const z = car.z + fz * 2.8 * CAR_SCALE;
   const y = car.y + 1.0;
   world.projectiles.push({ id: world.nextId++, kind, owner: r.id, x, y, z, heading: car.heading, speed: w.speed + base, life: w.life, pieceIndex: car.pieceIndex });
   world.events.push({ type: 'fire', racer: r.id, kind, x, y, z });
@@ -272,7 +273,7 @@ function fire(world: World, r: Racer): void {
 function drop(world: World, r: Racer): void {
   const car = r.car;
   const kind = r.spec.rear;
-  const back = kind === 'oil' ? 3.8 : 3.2;
+  const back = (kind === 'oil' ? 3.8 : 3.2) * CAR_SCALE;
   const x = car.x - forwardX(car.heading) * back;
   const z = car.z - forwardZ(car.heading) * back;
   const q = world.track.query(x, z, car.pieceIndex);

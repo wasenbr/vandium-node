@@ -1,10 +1,10 @@
-import type { VehicleSpec } from '../sim/vehicle';
+import { CAR_SCALE, type VehicleSpec } from '../sim/vehicle';
 
 /**
  * Os 5 carros do original. Cada um tem uma arma frontal e uma traseira; as cargas
  * recarregam a cada volta, como no jogo de 1993. Valores serão ajustados com a loja/upgrades.
  */
-const base = { halfWidth: 1.1, halfLength: 2.1, nitroCharges: 3, drag: 0.12, brake: 40, reverseMax: 11, mass: 1 };
+const base = { halfWidth: 1.1 * CAR_SCALE, halfLength: 2.1 * CAR_SCALE, nitroCharges: 3, drag: 0.12, brake: 40, reverseMax: 11, mass: 1 };
 
 export const VEHICLES: Record<string, VehicleSpec> = {
   dirtdevil: {
@@ -21,7 +21,7 @@ export const VEHICLES: Record<string, VehicleSpec> = {
   },
   battletrak: {
     ...base, id: 'battletrak', name: 'Battle Trak', maxSpeed: 33, accel: 19, steerRate: 2.3, grip: 12, nitroAccel: 24,
-    armor: 140, front: 'missile', frontCharges: 3, rear: 'mine', rearCharges: 3, halfWidth: 1.25, mass: 1.5,
+    armor: 140, front: 'missile', frontCharges: 3, rear: 'mine', rearCharges: 3, halfWidth: 1.25 * CAR_SCALE, mass: 1.5,
   },
   havac: {
     ...base, id: 'havac', name: 'Havac', maxSpeed: 42, accel: 27, steerRate: 2.8, grip: 9.5, nitroAccel: 30,

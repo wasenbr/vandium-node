@@ -19,7 +19,8 @@ export interface CarPose {
 }
 
 // Direção fixa da câmera aérea: olhando "de baixo para cima e da direita", como no original.
-const ISO_DIR = new THREE.Vector3(-1, 1.35, -1).normalize();
+// Isométrico clássico 2:1 da pixel art (câmera a 30° de elevação), como no original.
+const ISO_DIR = new THREE.Vector3(-1, Math.SQRT2 * Math.tan(Math.PI / 6), -1).normalize();
 const ISO_DISTANCE = 120;
 const BACK = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI);
 
@@ -33,7 +34,7 @@ export class CameraRig {
   private first = true;
   private aspect = 1;
   /** metros de pista visíveis na vertical da vista aérea */
-  isoView = 34;
+  isoView = 40;
 
   constructor() {
     this.iso = new THREE.OrthographicCamera(-1, 1, 1, -1, 1, 400);

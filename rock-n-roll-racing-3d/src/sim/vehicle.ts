@@ -2,6 +2,9 @@ import { clamp, forwardX, forwardZ, leftX, leftZ } from './math';
 import type { ControlInput } from './input';
 import type { Track } from './track';
 
+/** escala dos carros em relação à pista (o original tem carros pequenos em pistas largas) */
+export const CAR_SCALE = 0.8;
+
 export const GRAVITY = 25; // gravidade "arcade": saltos rápidos e secos
 const GROUND_SNAP = 0.35;
 const STEP_BLOCK = 1.0;

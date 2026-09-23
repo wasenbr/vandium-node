@@ -25,7 +25,8 @@ export interface TrackDef {
 }
 
 export const TILE = 16;
-export const HALF_WIDTH = 5;
+/** meia-largura da pista: larga em relação aos carros, como no original */
+export const HALF_WIDTH = 6.5;
 export const RAMP_HEIGHT = 3;
 export const JUMP_HEIGHT = 2;
 const ARC_RADIUS = TILE / 2;
