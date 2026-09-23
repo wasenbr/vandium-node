@@ -86,7 +86,8 @@ export function createAirBlade(color: number, shadows: boolean): CarVisual {
   const flames = k.flames([[-0.62, 1.45, -2.4], [0.62, 1.45, -2.4]], 0.9);
 
   const eye = new THREE.Vector3(0, 1.46, -0.2);
-  const { cockpit, steeringWheel } = cockpitRig(k, { eye, halfWidth: 0.7, roofY: 1.75, frontZ: 0.9 });
+  // o cockpit fica preso à carroceria (não ao casco que balança), alinhado com a câmera
+  const { cockpit, steeringWheel } = cockpitRig(new Kit(color, shadows, body), { eye, halfWidth: 0.7, roofY: 1.75, frontZ: 0.9 });
 
   let fanAngle = 0;
   let lastT = 0;

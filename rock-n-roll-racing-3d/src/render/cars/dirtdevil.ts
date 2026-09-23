@@ -50,9 +50,12 @@ export function createDirtDevil(color: number, shadows: boolean): CarVisual {
   const roof = k.add(new THREE.BoxGeometry(1.0, 0.03, 1.15), k.trim, 0, 1.72, -0.42);
   roof.rotation.x = 0.08;
 
-  // emissor de laser no topo da gaiola
-  k.add(new THREE.BoxGeometry(0.22, 0.18, 0.6), k.gunMetal, 0, 1.85, 0.05);
-  k.add(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 8), k.gunMetal, 0, 1.85, 0.55).rotation.x = Math.PI / 2;
+  // emissor de laser no topo da gaiola (escondido no cockpit: fica colado no olho do piloto)
+  const roofGear: THREE.Object3D[] = [];
+  roofGear.push(k.add(new THREE.BoxGeometry(0.22, 0.18, 0.6), k.gunMetal, 0, 1.85, 0.05));
+  const emitter = k.add(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 8), k.gunMetal, 0, 1.85, 0.55);
+  emitter.rotation.x = Math.PI / 2;
+  roofGear.push(emitter);
   // lata de óleo traseira
   k.add(new THREE.CylinderGeometry(0.16, 0.16, 0.5, 12), k.gunMetal, 0, 0.72, -2.05).rotation.z = Math.PI / 2;
 
@@ -61,6 +64,7 @@ export function createDirtDevil(color: number, shadows: boolean): CarVisual {
   for (const sx of [-0.35, 0.35]) {
     const lamp = k.add(new THREE.CylinderGeometry(0.1, 0.1, 0.08, 14), k.head, sx, 1.83, 0.2);
     lamp.rotation.x = Math.PI / 2;
+    roofGear.push(lamp);
   }
   k.lights([], [[0.45, 0.8, -1.92]], 0.2);
   const flames = k.flames([[-0.35, 1.55, -2.25], [0.35, 1.55, -2.25]], 0.7);
@@ -78,7 +82,7 @@ export function createDirtDevil(color: number, shadows: boolean): CarVisual {
   return {
     root,
     body,
-    cabin: [roof],
+    cabin: [roof, ...roofGear],
     cockpit,
     steeringWheel,
     flames,
