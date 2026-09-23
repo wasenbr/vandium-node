@@ -230,3 +230,7 @@ tr.total td { font-weight: 800; color: var(--accent); border-bottom: none; }
   .hub-head { grid-template-columns: repeat(2, 1fr); }
   .hub-grid { grid-template-columns: 1fr; }
 }
+.toggle { min-width: 120px; padding: 8px; border-radius: 10px; border: 2px solid var(--line); background: rgba(255, 255, 255, 0.06); font-weight: 800; font-size: 13px !important; }
+.toggle.on { border-color: #5cff5c; color: #5cff5c; background: rgba(92, 255, 92, 0.1); }
+.vol { width: 150px; accent-color: var(--accent); }
+code { background: rgba(255, 255, 255, 0.1); padding: 1px 5px; border-radius: 4px; }

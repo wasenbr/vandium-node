@@ -44,6 +44,22 @@ export interface MenuActions {
   resultsContinue(): void;
   toMain(): void;
   setCamera(mode: CameraMode): void;
+  openSettings(): void;
+  closeSettings(): void;
+  setAudio(key: 'music' | 'sfx' | 'announcer', on: boolean): void;
+  setMusicVolume(v: number): void;
+  addMusic(files: File[]): void;
+  clearMusic(): void;
+  skipTrack(): void;
+}
+
+export interface AudioSettings {
+  music: boolean;
+  sfx: boolean;
+  announcer: boolean;
+  musicVolume: number;
+  bundled: number;
+  user: number;
 }
 
 export interface ResultRow {
@@ -148,6 +164,7 @@ export class Menus {
           <button class="${hasSave ? '' : 'go'}" data-act="new">Nova campanha</button>
           <button data-act="quick">Corrida rápida</button>
           <button data-act="password">Carregar senha</button>
+          <button data-act="settings">⚙ Som e música</button>
         </div>
         ${this.helpBlock()}
       </div>`);
@@ -241,6 +258,7 @@ export class Menus {
         <div class="row-buttons">
           <button data-act="shop">🛒 Loja</button>
           <button data-act="show-password">🔑 Senha</button>
+          <button data-act="settings">⚙ Som</button>
           <button data-act="main">Menu</button>
         </div>
       </div>`);
@@ -311,6 +329,43 @@ export class Menus {
       </div>`);
   }
 
+  /* ---------------- som e música ---------------- */
+
+  showSettings(a: AudioSettings): void {
+    const toggle = (key: string, label: string, on: boolean) =>
+      `<div class="shop-row"><div><b>${label}</b></div><button class="toggle ${on ? 'on' : ''}" data-toggle="${key}" data-on="${on ? 1 : 0}">${on ? 'LIGADO' : 'DESLIGADO'}</button></div>`;
+    const total = a.bundled + a.user;
+    this.show(`
+      <div class="card small">
+        <h2>SOM E MÚSICA</h2>
+        ${toggle('music', 'Música', a.music)}
+        <div class="shop-row"><div><b>Volume da música</b></div><input class="vol" type="range" min="0" max="100" value="${Math.round(a.musicVolume * 100)}"/></div>
+        ${toggle('sfx', 'Efeitos sonoros', a.sfx)}
+        ${toggle('announcer', 'Locutor', a.announcer)}
+        <h3>Minhas músicas</h3>
+        <p class="small-note">${
+          total
+            ? `${total} música(s): ${a.bundled} da pasta <code>music/</code> e ${a.user} escolhida(s) neste aparelho. Tocam em ordem aleatória.`
+            : 'Nenhuma música sua — tocando a trilha de rock sintetizada (um tema por planeta). Escolha arquivos do aparelho ou coloque-os na pasta <code>music/</code> do projeto.'
+        }</p>
+        <input class="music-files" type="file" accept="audio/*" multiple hidden />
+        <button data-act="pick-music">➕ Adicionar músicas do aparelho</button>
+        ${a.user ? '<button data-act="clear-music">🗑 Remover músicas do aparelho</button>' : ''}
+        ${total ? '<button data-act="skip-track">⏭ Próxima música</button>' : ''}
+        <p class="pw-msg"></p>
+        <button class="go" data-act="close-settings">Voltar</button>
+      </div>`);
+    const vol = this.el.querySelector<HTMLInputElement>('.vol')!;
+    vol.addEventListener('input', () => this.actions.setMusicVolume(Number(vol.value) / 100));
+    const files = this.el.querySelector<HTMLInputElement>('.music-files')!;
+    files.addEventListener('change', () => {
+      if (files.files?.length) {
+        this.el.querySelector('.pw-msg')!.textContent = 'Guardando músicas…';
+        this.actions.addMusic(Array.from(files.files));
+      }
+    });
+  }
+
   /* ---------------- pausa e resultado ---------------- */
 
   showPause(): void {
@@ -319,6 +374,7 @@ export class Menus {
         <h2>PAUSADO</h2>
         <button class="go" data-act="resume">Continuar</button>
         <button data-act="restart">Reiniciar corrida</button>
+        <button data-act="settings">⚙ Som e música</button>
         <button data-act="quit">${this.inCampaign ? 'Voltar à garagem (corrida não conta)' : 'Menu principal'}</button>
       </div>`);
   }
@@ -387,6 +443,7 @@ export class Menus {
       this.showShop(this.lastHub);
       return;
     }
+    if (d.toggle) this.actions.setAudio(d.toggle as 'music' | 'sfx' | 'announcer', d.on !== '1');
     if (d.upgrade) this.actions.buyUpgrade(d.upgrade as UpgradeKind);
     if (d.charge) this.actions.buyCharge(d.charge as ChargeKind);
     if (d.buycar) this.actions.buyCar(d.buycar);
@@ -434,6 +491,17 @@ export class Menus {
         return this.actions.quit();
       case 'results-continue':
         return this.actions.resultsContinue();
+      case 'settings':
+        return this.actions.openSettings();
+      case 'close-settings':
+        return this.actions.closeSettings();
+      case 'pick-music':
+        this.el.querySelector<HTMLInputElement>('.music-files')?.click();
+        return;
+      case 'clear-music':
+        return this.actions.clearMusic();
+      case 'skip-track':
+        return this.actions.skipTrack();
     }
     this.refresh();
   }

@@ -174,7 +174,7 @@ validadas por teste (circuito fecha e a CPU completa voltas).
 | 5 ✅ | Os 5 carros + melhorias (motor, pneus, suspensão, blindagem) + cargas extras + loja com troca | Loop corrida → loja → corrida |
 | 6 ✅ | Campanha: 6 planetas × Divisões B/A, pontos, 6 pilotos, save automático + senha | Jogo completo de ponta a ponta |
 | 7 | Pistas de todos os planetas + editor de pistas | Conteúdo completo |
-| 8 | HUD final, minimapa, retrovisor, locutor, música, menus | Apresentação |
+| 8 ✅ | HUD, minimapa, retrovisor, locutor, música (trilha sintetizada + músicas do jogador), menus, 5 modelos de carro | Apresentação |
 | 9 | Split‑screen 2 jogadores + gamepad | Multiplayer local |
 | 10 | Arte final, efeitos, otimização, build desktop | Versão 1.0 |
 

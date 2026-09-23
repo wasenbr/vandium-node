@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { Announcer, LINES } from '../audio/announcer';
-import { toggleMute, unlockAudio } from '../audio/context';
+import { setSfxEnabled, toggleMute, unlockAudio } from '../audio/context';
+import { Music } from '../audio/music';
 import { EngineSound } from '../audio/engine';
 import { sfxBump, sfxDrop, sfxExplosion, sfxHit, sfxLaser, sfxMissile, sfxPickup } from '../audio/sfx';
 import { trackById, TRACKS } from '../data/tracks';
@@ -13,7 +14,7 @@ import { buildSpec, CAR_PRICES, CHARACTERS, chargePrice, newCarSetup, tradeInVal
 import { loadCampaign, loadPrefs, saveCampaign, savePrefs } from './storage';
 import { Controls, createTouchControls, isTouchDevice } from '../input/controls';
 import { CAMERA_LABELS, CameraRig, type CameraMode } from '../render/cameras';
-import { createCarMesh, type CarVisual } from '../render/carMesh';
+import { createCarMesh, type CarVisual } from '../render/cars';
 import { Effects } from '../render/effects';
 import { buildEnvironment, buildGround, buildSky } from '../render/environment';
 import { PostFx } from '../render/postfx';
@@ -91,7 +92,10 @@ export class Game {
   private level: THREE.Group | null = null;
   private hemi: THREE.HemisphereLight;
   private resultsShown = false;
-  private prefs = loadPrefs({ camera: 'iso' as CameraMode });
+  private prefs = loadPrefs({ camera: 'iso' as CameraMode, music: true, sfx: true, announcer: true, musicVolume: 0.7 });
+  private music = new Music();
+  /** tela de menu atual (para voltar depois das configurações de som) */
+  private screen: 'main' | 'hub' = 'main';
   private playerId = 0;
   private views: CarView[] = [];
   private effects = new Effects();
@@ -154,6 +158,15 @@ export class Game {
     this.menus = new Menus(root, this.menuActions(), VEHICLES, TRACKS);
     this.menus.setCameraChoice(this.prefs.camera);
     this.campaign = loadCampaign();
+
+    this.music.enabled = this.prefs.music;
+    this.music.volume = this.prefs.musicVolume;
+    setSfxEnabled(this.prefs.sfx);
+    this.announcer.enabled = this.prefs.announcer;
+    void this.music.init();
+    this.music.onTrackChange = (name) => {
+      if (this.phase === 'racing' || this.phase === 'countdown') this.hud.showToast(`♪ ${name}`);
+    };
 
     this.controls.onUiAction((a) => {
       if (a === 'camera' && this.phase !== 'menu') this.setCamera(this.rig.cycle());
@@ -283,7 +296,7 @@ export class Game {
       if (v.label) this.scene.remove(v.label);
     }
     this.views = this.world.racers.map((r, i) => {
-      const visual = createCarMesh(r.color, this.shadows);
+      const visual = createCarMesh(r.spec.id, r.color, this.shadows);
       this.scene.add(visual.root);
       const label = i !== this.playerId ? nameSprite(r.name, r.color) : null;
       if (label) this.scene.add(label);
@@ -306,6 +319,7 @@ export class Game {
     this.hud.setVisible(true);
     this.hud.setLap(1, this.world.laps);
     this.hud.message('3', 0, 'count');
+    this.music.play(this.track.def.theme, 'race');
   }
 
   private toMenu(): void {
@@ -313,6 +327,8 @@ export class Game {
     this.engine.silence();
     window.speechSynthesis?.cancel();
     this.hud.setVisible(false);
+    this.screen = 'main';
+    this.music.play(this.track.def.theme, 'menu');
     this.menus.showMain(!!this.campaign);
   }
 
@@ -320,11 +336,13 @@ export class Game {
     if (this.phase === 'paused') {
       this.phase = this.phaseBeforePause;
       this.menus.hideAll();
+      this.music.setMood('race');
     } else if (this.phase === 'racing' || this.phase === 'countdown') {
       this.phaseBeforePause = this.phase;
       this.phase = 'paused';
       this.engine.silence();
       window.speechSynthesis?.cancel();
+      this.music.setMood('pause');
       this.menus.showPause();
     }
   }
@@ -552,6 +570,7 @@ export class Game {
       report = { outcome: res.outcome, pointsEarned: res.pointsEarned, points: this.campaign.points, label: this.campaignLabel() };
     }
     this.hud.clearMessage();
+    this.music.setMood('menu');
     this.menus.showResults(rows, this.player.progress.lapTimes, report);
   }
 
@@ -586,6 +605,8 @@ export class Game {
     this.hud.setVisible(false);
     this.setup = this.campaignSetup(c);
     this.createRace();
+    this.screen = 'hub';
+    this.music.play(this.track.def.theme, 'menu');
     this.menus.showHub(this.hubData(), notice);
   }
 
@@ -599,10 +620,22 @@ export class Game {
     this.menus.showShop(this.hubData(), `✔ ${label} comprado(a)!`);
   }
 
+  private audioSettings() {
+    return {
+      music: this.prefs.music,
+      sfx: this.prefs.sfx,
+      announcer: this.prefs.announcer,
+      musicVolume: this.prefs.musicVolume,
+      bundled: this.music.bundledCount,
+      user: this.music.userCount,
+    };
+  }
+
   private menuActions() {
     const beginAudio = () => {
       unlockAudio();
       this.engine.start();
+      this.music.play(this.track.def.theme, 'menu');
       if (this.touch) this.enterFullscreen();
     };
     return {
@@ -662,6 +695,46 @@ export class Game {
         this.toHub();
       },
       toMain: () => this.toMenu(),
+      openSettings: () => {
+        unlockAudio();
+        this.menus.showSettings(this.audioSettings());
+      },
+      closeSettings: () => {
+        if (this.phase === 'paused') this.menus.showPause();
+        else if (this.screen === 'hub' && this.campaign) this.menus.showHub(this.hubData());
+        else this.menus.showMain(!!this.campaign);
+      },
+      setAudio: (key: 'music' | 'sfx' | 'announcer', on: boolean) => {
+        this.prefs[key] = on;
+        savePrefs(this.prefs);
+        if (key === 'music') {
+          this.music.setEnabled(on);
+          if (on) this.music.play(this.track.def.theme, this.phase === 'paused' ? 'pause' : 'menu');
+        } else if (key === 'sfx') setSfxEnabled(on);
+        else {
+          this.announcer.enabled = on;
+          if (!on) window.speechSynthesis?.cancel();
+        }
+        this.menus.showSettings(this.audioSettings());
+      },
+      setMusicVolume: (v: number) => {
+        this.prefs.musicVolume = v;
+        savePrefs(this.prefs);
+        this.music.setVolume(v);
+      },
+      addMusic: (files: File[]) => {
+        void this.music.addFiles(files).then(() => {
+          this.music.play(this.track.def.theme, this.phase === 'paused' ? 'pause' : 'menu');
+          this.menus.showSettings(this.audioSettings());
+        });
+      },
+      clearMusic: () => {
+        void this.music.clearFiles().then(() => {
+          this.music.play(this.track.def.theme, this.phase === 'paused' ? 'pause' : 'menu');
+          this.menus.showSettings(this.audioSettings());
+        });
+      },
+      skipTrack: () => this.music.skip(),
       setCamera: (mode: CameraMode) => {
         this.prefs.camera = mode;
         savePrefs(this.prefs);
@@ -686,10 +759,11 @@ export class Game {
       visual.root.visible = r.alive && (r.invuln <= 0 || Math.sin(this.clock * 30) > -0.3);
       visual.root.position.set(x, y, z);
       visual.root.rotation.set(-lerp(p.pitch, v.pitch, alpha), heading, lerp(p.roll, v.roll, alpha), 'YXZ');
-      for (const w of visual.wheels) w.rotation.x = v.wheelSpin;
-      for (const fw of visual.frontWheels) fw.rotation.y = -v.steer * 0.45;
-      visual.flame.visible = r.alive && v.nitroTime > 0;
-      if (visual.flame.visible) visual.flame.scale.setScalar(0.8 + Math.random() * 0.5);
+      visual.animate({ spin: v.wheelSpin, steer: v.steer, speed: forwardSpeed(v), time: this.clock, grounded: v.grounded });
+      for (const f of visual.flames) {
+        f.visible = r.alive && v.nitroTime > 0;
+        if (f.visible) f.scale.setScalar(0.8 + Math.random() * 0.5);
+      }
       if (view.label) {
         view.label.visible = r.alive;
         view.label.position.set(x, y + 3, z);
@@ -722,6 +796,7 @@ export class Game {
         heading: pose.heading,
         velocity: new THREE.Vector3(pc.vx, pc.vy, pc.vz),
         shake: this.shake,
+        eye: pv.eye,
       },
       frameDt,
     );

@@ -1,5 +1,4 @@
 import * as THREE from 'three';
-import { EYE } from './carMesh';
 
 export type CameraMode = 'iso' | 'cockpit' | 'chase';
 export const CAMERA_MODES: CameraMode[] = ['iso', 'cockpit', 'chase'];
@@ -15,6 +14,8 @@ export interface CarPose {
   heading: number;
   velocity: THREE.Vector3;
   shake: number;
+  /** olhos do piloto no espaço do carro */
+  eye: THREE.Vector3;
 }
 
 // Direção fixa da câmera aérea: olhando "de baixo para cima e da direita", como no original.
@@ -83,7 +84,7 @@ export class CameraRig {
       this.iso.position.copy(this.isoTarget).addScaledVector(ISO_DIR, ISO_DISTANCE).addScaledVector(shake, 0.5);
       this.iso.lookAt(this.isoTarget);
     } else if (this.mode === 'cockpit') {
-      const eye = EYE.clone().applyQuaternion(car.quaternion).add(car.position);
+      const eye = car.eye.clone().applyQuaternion(car.quaternion).add(car.position);
       this.persp.position.copy(eye).addScaledVector(shake, 0.25);
       this.persp.quaternion.copy(car.quaternion).multiply(BACK);
     } else {

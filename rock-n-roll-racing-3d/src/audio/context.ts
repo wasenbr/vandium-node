@@ -1,10 +1,16 @@
-/** AudioContext compartilhado — só pode ser criado/retomado após um gesto do usuário. */
+/**
+ * AudioContext compartilhado — só pode ser criado/retomado após um gesto do usuário.
+ * Mixagem: efeitos (sfx) e música têm volumes próprios e passam por um volume geral (master).
+ */
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
+let sfxBus: GainNode | null = null;
+let musicBus: GainNode | null = null;
 let muted = false;
+let sfxOn = true;
 
-export function audio(): { ctx: AudioContext; out: GainNode } | null {
-  return ctx && master ? { ctx, out: master } : null;
+export function audio(): { ctx: AudioContext; out: GainNode; music: GainNode } | null {
+  return ctx && sfxBus && musicBus ? { ctx, out: sfxBus, music: musicBus } : null;
 }
 
 export function unlockAudio(): void {
@@ -18,6 +24,11 @@ export function unlockAudio(): void {
   master = ctx.createGain();
   master.gain.value = muted ? 0 : 1;
   master.connect(ctx.destination);
+  sfxBus = ctx.createGain();
+  sfxBus.gain.value = sfxOn ? 1 : 0;
+  sfxBus.connect(master);
+  musicBus = ctx.createGain();
+  musicBus.connect(master);
 }
 
 export function toggleMute(): boolean {
@@ -29,4 +40,9 @@ export function toggleMute(): boolean {
 
 export function isMuted(): boolean {
   return muted;
+}
+
+export function setSfxEnabled(on: boolean): void {
+  sfxOn = on;
+  if (ctx && sfxBus) sfxBus.gain.setTargetAtTime(on ? 1 : 0, ctx.currentTime, 0.05);
 }

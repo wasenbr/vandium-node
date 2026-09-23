@@ -23,6 +23,16 @@ no terminal (mesmo Wi‑Fi). O `dist/` pode ser publicado em qualquer hospedagem
   e pode ser levado para outro aparelho com a **senha**.
 - **Corrida rápida:** qualquer uma das 12 pistas, com qualquer carro.
 
+## Música
+
+- Sem nada configurado, toca uma **trilha de rock sintetizada** em tempo real (bateria, baixo e
+  guitarra distorcida), com um tema por planeta.
+- **No PC:** coloque arquivos (`.mp3`, `.ogg`, `.m4a`, `.wav`...) na pasta [`music/`](music/README.md)
+  — eles entram no jogo automaticamente e não vão para o git.
+- **No celular:** menu **⚙ Som e música → Adicionar músicas do aparelho**; os arquivos ficam
+  guardados no navegador.
+- Na mesma tela: liga/desliga música, efeitos e locutor, volume da música e "próxima música".
+
 ## Controles
 
 | | Teclado | Controle | Celular |
@@ -44,5 +54,6 @@ Armas e nitro recarregam a cada volta, como no original. Parâmetros de URL para
 
 - `src/sim/` — simulação pura e determinística (pista, física, voltas, armas, IA), sem Three.js:
   a mesma que rodará no servidor online. `world.ts` é o estado da corrida; `ai.ts` os pilotos da CPU.
-- `src/render/` — pista, carro, cenário, câmeras e pós-processamento, tudo gerado por código.
+- `src/render/` — pista, cenário, câmeras e pós-processamento, tudo gerado por código.
+  `src/render/cars/` tem um modelo 3D por carro (buggy, muscle car, hovercraft, blindado de esteiras, cunha).
 - `src/input/`, `src/ui/`, `src/audio/`, `src/core/` — controles, HUD/menus, som e loop do jogo.
