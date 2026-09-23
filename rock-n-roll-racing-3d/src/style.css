@@ -44,9 +44,23 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .hud-bl { position: absolute; bottom: max(14px, env(safe-area-inset-bottom)); left: max(14px, env(safe-area-inset-left)); }
 .hud-speed { font-size: 16px; color: var(--muted); }
 .hud-speed b { font-size: 44px; color: var(--text); font-variant-numeric: tabular-nums; }
-.hud-nitro { display: flex; gap: 6px; margin-top: 4px; }
-.hud-nitro span { width: 22px; height: 12px; border-radius: 3px; border: 1px solid #40c0ff; }
-.hud-nitro span.on { background: #40c0ff; box-shadow: 0 0 8px #40c0ff; }
+.hud-pos { line-height: 0.9; }
+.hud-pos b { font-size: 54px; color: var(--text); font-style: italic; }
+.hud-pos span { font-size: 22px; color: var(--muted); }
+.hud-money { margin-left: 10px; font-size: 20px; color: #ffd84a; font-weight: 800; }
+.hud-armor { width: 180px; height: 10px; margin: 6px 0 2px; background: rgba(0, 0, 0, 0.55); border: 1px solid rgba(255, 255, 255, 0.3); border-radius: 5px; overflow: hidden; }
+.hud-armor i { display: block; height: 100%; background: linear-gradient(90deg, #2fc840, #7aff6a); transition: width 0.2s; }
+.hud-armor i.mid { background: linear-gradient(90deg, #d8a010, #ffd84a); }
+.hud-armor i.low { background: linear-gradient(90deg, #b01010, #ff4a2a); animation: blink 0.5s infinite alternate; }
+@keyframes blink { to { opacity: 0.4; } }
+.hud-weapons .w { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.hud-weapons .w span { width: 58px; font-size: 11px; font-weight: 800; letter-spacing: 1px; color: var(--muted); }
+.hud-weapons .w i { width: 16px; height: 9px; border-radius: 2px; border: 1px solid currentColor; }
+.hud-weapons .w i.on { background: currentColor; box-shadow: 0 0 6px currentColor; }
+.hud-weapons .front { color: #ff5a4a; }
+.hud-weapons .rear { color: #ffd84a; }
+.hud-weapons .nitro { color: #40c0ff; }
+.hud-weapons .nitro.active span { color: #40c0ff; }
 .hud-center {
   position: absolute; left: 0; right: 0; top: 34%; text-align: center;
   font-size: 64px; font-weight: 900; letter-spacing: 4px; color: var(--accent);
@@ -111,6 +125,7 @@ h3 { margin: 18px 0 8px; font-size: 13px; letter-spacing: 2px; text-transform: u
   background: rgba(255, 255, 255, 0.06); border: 2px solid var(--line); border-radius: 10px; padding: 10px; text-align: left;
 }
 .card.small button { text-align: center; font-size: 17px; }
+.card.small button.go { background: linear-gradient(180deg, #ffd84a, #e0a800); border: none; }
 .car b { display: block; margin-bottom: 6px; }
 .car.sel, .cam.sel { border-color: var(--accent); background: rgba(242, 195, 24, 0.12); }
 .stat { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--muted); margin-top: 3px; }
@@ -134,6 +149,10 @@ table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nu
 td { padding: 6px 4px; border-bottom: 1px solid var(--line); }
 td:last-child { text-align: right; }
 tr.best td { color: #5cff5c; }
+tr.me td { color: var(--accent); font-weight: 800; }
+th { text-align: left; font-size: 11px; letter-spacing: 1px; color: var(--muted); padding: 4px; border-bottom: 1px solid var(--line); }
+th:last-child { text-align: right; }
+.card.results { width: min(560px, 100%); }
 tr.total td { font-weight: 800; color: var(--accent); border-bottom: none; }
 
 @media (max-height: 500px) {
@@ -146,3 +165,7 @@ tr.total td { font-weight: 800; color: var(--accent); border-bottom: none; }
   .touch-right button:not(.small) { width: 68px; height: 68px; }
   .touch-right .gas { width: 84px !important; height: 84px !important; }
 }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; border: 1px solid #000; }
+.money { margin: 4px 0; text-align: center; color: var(--muted); }
+.money b { color: #ffd84a; }
+.car em { display: block; margin-top: 6px; font-size: 10px; font-style: normal; color: var(--muted); }

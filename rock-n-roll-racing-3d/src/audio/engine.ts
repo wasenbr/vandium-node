@@ -1,22 +1,17 @@
+import { audio } from './context';
+
 /** Som de motor sintetizado (Web Audio) — placeholder até termos áudio gravado. */
 export class EngineSound {
-  private ctx: AudioContext | null = null;
-  private osc1!: OscillatorNode;
+  private osc1: OscillatorNode | null = null;
   private osc2!: OscillatorNode;
   private gain!: GainNode;
   private filter!: BiquadFilterNode;
-  muted = false;
 
-  /** Precisa ser chamado dentro de um gesto do usuário (clique/toque). */
+  /** Precisa ser chamado depois de unlockAudio() (gesto do usuário). */
   start(): void {
-    if (this.ctx) {
-      void this.ctx.resume();
-      return;
-    }
-    const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!AC) return;
-    const ctx = new AC();
-    this.ctx = ctx;
+    const a = audio();
+    if (!a || this.osc1) return;
+    const { ctx, out } = a;
     this.osc1 = ctx.createOscillator();
     this.osc2 = ctx.createOscillator();
     this.osc1.type = 'sawtooth';
@@ -29,22 +24,24 @@ export class EngineSound {
     this.osc1.connect(this.filter);
     this.osc2.connect(this.filter);
     this.filter.connect(this.gain);
-    this.gain.connect(ctx.destination);
+    this.gain.connect(out);
     this.osc1.start();
     this.osc2.start();
   }
 
   update(speedRatio: number, throttle: number, boosting: boolean): void {
-    if (!this.ctx) return;
-    const t = this.ctx.currentTime;
+    const a = audio();
+    if (!a || !this.osc1) return;
+    const t = a.ctx.currentTime;
     const base = 45 + speedRatio * 120 + throttle * 15 + (boosting ? 30 : 0);
     this.osc1.frequency.setTargetAtTime(base, t, 0.05);
     this.osc2.frequency.setTargetAtTime(base * 0.5, t, 0.05);
     this.filter.frequency.setTargetAtTime(400 + speedRatio * 1400 + (boosting ? 800 : 0), t, 0.05);
-    this.gain.gain.setTargetAtTime(this.muted ? 0 : 0.05 + throttle * 0.04, t, 0.08);
+    this.gain.gain.setTargetAtTime(0.05 + throttle * 0.04, t, 0.08);
   }
 
   silence(): void {
-    if (this.ctx) this.gain.gain.setTargetAtTime(0, this.ctx.currentTime, 0.1);
+    const a = audio();
+    if (a && this.osc1) this.gain.gain.setTargetAtTime(0, a.ctx.currentTime, 0.1);
   }
 }

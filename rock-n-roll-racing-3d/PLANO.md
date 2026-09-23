@@ -160,9 +160,9 @@ Enquanto isso, `chem6-1` é uma pista provisória no estilo de Chem VI.
 |---|---|---|
 | 0 ✅ | Setup Vite + TS + Three.js, loop de jogo com passo fixo | Tela com cena 3D |
 | 1 ✅ | Física arcade de 1 carro + pista de teste + **3 câmeras** + toque no celular | Dirigir e alternar iso/cockpit/chase |
-| 2 | Formato de pista em tiles + gerador + rampas/saltos + checkpoints/voltas | Correr voltas cronometradas |
-| 3 | 3 oponentes de IA + posições + tela de resultado | Corrida completa de 4 carros |
-| 4 | Armas (frontal, traseira, nitro), dano, explosão, respawn, dinheiro na pista | Corrida de combate |
+| 2 ✅ | Formato de pista em tiles + gerador + rampas/saltos + checkpoints/voltas | Correr voltas cronometradas |
+| 3 ✅ | 3 oponentes de IA (Rip, Shred, Viper Mackay) + posições + tela de resultado | Corrida completa de 4 carros |
+| 4 ✅ | Armas (laser/míssil, mina/óleo, nitro), dano, explosão, respawn, dinheiro e blindagem na pista, locutor | Corrida de combate |
 | 5 | Os 5 carros + upgrades + loja | Loop corrida → loja → corrida |
 | 6 | Campanha: planetas, divisões, pontos, personagens, save | Jogo completo de ponta a ponta |
 | 7 | Pistas de todos os planetas + editor de pistas | Conteúdo completo |

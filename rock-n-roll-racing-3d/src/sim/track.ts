@@ -219,6 +219,23 @@ export class Track {
     return best!;
   }
 
+  /** Ponto da linha central a uma distância (em metros) da linha de chegada. */
+  pointAtDist(dist: number): { x: number; z: number; heading: number; h: number; pieceIndex: number } {
+    const T = this.totalLength;
+    const d = ((dist % T) + T) % T;
+    let lo = 0;
+    let hi = this.pieces.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (this.pieces[mid].startDist <= d) lo = mid;
+      else hi = mid - 1;
+    }
+    const p = this.pieces[lo];
+    const s = d - p.startDist;
+    const pt = this.pointOn(p, s);
+    return { ...pt, h: this.heightOn(p, s), pieceIndex: p.index };
+  }
+
   /** Amostra a linha central a cada `step` metros (usado para malha, minimapa e IA). */
   sampleCenterline(step: number): CenterPoint[] {
     const out: CenterPoint[] = [];

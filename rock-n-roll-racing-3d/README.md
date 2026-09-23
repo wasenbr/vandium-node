@@ -22,12 +22,19 @@ no terminal (mesmo Wi‑Fi). O `dist/` pode ser publicado em qualquer hospedagem
 | Acelerar | ↑ / W | RT ou A | ACEL |
 | Frear / ré | ↓ / S | LT | FREIO |
 | Virar | ← → / A D | analógico / direcional | ◀ ▶ |
+| Arma frontal (laser/míssil) | Espaço / J | X / RB | TIRO |
+| Arma traseira (mina/óleo) | X / K | B / LB | MINA / ÓLEO |
 | Nitro | Shift | L3 / R3 | NITRO |
 | Câmera (aérea → cockpit → perseguição) | C | Y | 🎥 |
 | Pausa | Esc / P | Start | ❚❚ |
+| Som liga/desliga | M | | |
+
+Armas e nitro recarregam a cada volta, como no original. Parâmetros de URL para testes:
+`?autopilot` (a IA pilota o seu carro) e `?laps=1` (corrida curta).
 
 ## Estrutura
 
-- `src/sim/` — simulação pura (pista, física, voltas), sem Three.js: a mesma que rodará no servidor online.
+- `src/sim/` — simulação pura e determinística (pista, física, voltas, armas, IA), sem Three.js:
+  a mesma que rodará no servidor online. `world.ts` é o estado da corrida; `ai.ts` os pilotos da CPU.
 - `src/render/` — pista, carro, cenário, câmeras e pós-processamento, tudo gerado por código.
 - `src/input/`, `src/ui/`, `src/audio/`, `src/core/` — controles, HUD/menus, som e loop do jogo.

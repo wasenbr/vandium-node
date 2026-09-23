@@ -2,7 +2,7 @@ import { clamp } from '../sim/math';
 import { emptyInput, type ControlInput } from '../sim/input';
 
 /** Ações de interface (não vão para a simulação). */
-export type UiAction = 'camera' | 'pause';
+export type UiAction = 'camera' | 'pause' | 'mute';
 
 /**
  * Junta teclado, controle (Gamepad API) e botões de toque num único ControlInput.
@@ -19,6 +19,7 @@ export class Controls {
       this.keys.add(e.code);
       if (e.code === 'KeyC') this.emit('camera');
       if (e.code === 'Escape' || e.code === 'KeyP') this.emit('pause');
+      if (e.code === 'KeyM') this.emit('mute');
       if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.code));

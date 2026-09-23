@@ -97,7 +97,7 @@ export class CameraRig {
     }
 
     // retrovisor (usado no cockpit): olha para trás, acima do aerofólio
-    const mirrorPos = new THREE.Vector3(0, 1.8, -1.2).applyQuaternion(car.quaternion).add(car.position);
+    const mirrorPos = new THREE.Vector3(0, 1.7, -2.6).applyQuaternion(car.quaternion).add(car.position);
     this.mirror.position.copy(mirrorPos);
     this.mirror.quaternion.copy(car.quaternion);
     this.mirror.rotateX(-0.08);

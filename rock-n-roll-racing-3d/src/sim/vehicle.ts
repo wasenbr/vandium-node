@@ -21,7 +21,18 @@ export interface VehicleSpec {
   nitroCharges: number;
   halfWidth: number;
   halfLength: number;
+  /** pontos de blindagem */
+  armor: number;
+  /** massa relativa nas batidas entre carros */
+  mass: number;
+  front: FrontWeapon;
+  frontCharges: number;
+  rear: RearWeapon;
+  rearCharges: number;
 }
+
+export type FrontWeapon = 'laser' | 'missile';
+export type RearWeapon = 'mine' | 'oil';
 
 export interface VehicleState {
   x: number;

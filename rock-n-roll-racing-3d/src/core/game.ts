@@ -1,22 +1,27 @@
 import * as THREE from 'three';
+import { Announcer, LINES } from '../audio/announcer';
+import { toggleMute, unlockAudio } from '../audio/context';
 import { EngineSound } from '../audio/engine';
+import { sfxBump, sfxDrop, sfxExplosion, sfxHit, sfxLaser, sfxMissile, sfxPickup } from '../audio/sfx';
+import { CHEM6_OPPONENTS } from '../data/drivers';
 import { TRACKS } from '../data/tracks';
 import { VEHICLES } from '../data/vehicles';
 import { Controls, createTouchControls, isTouchDevice } from '../input/controls';
-import { emptyInput } from '../sim/input';
-import { clamp, lerp, lerpAngle, leftX, leftZ } from '../sim/math';
-import { createProgress, updateProgress, type RacerProgress } from '../sim/race';
-import { Track } from '../sim/track';
-import { createVehicleState, forwardSpeed, stepVehicle, type VehicleSpec, type VehicleState } from '../sim/vehicle';
 import { CAMERA_LABELS, CameraRig, type CameraMode } from '../render/cameras';
 import { createCarMesh, type CarVisual } from '../render/carMesh';
+import { Effects } from '../render/effects';
 import { buildEnvironment, buildGround, buildSky } from '../render/environment';
 import { PostFx } from '../render/postfx';
 import { buildScenery } from '../render/scenery';
 import { THEMES } from '../render/themes';
-import { buildTrackMesh } from '../render/trackMesh';
+import { buildTrackMesh, canvasTexture } from '../render/trackMesh';
+import { emptyInput, type ControlInput } from '../sim/input';
+import { clamp, lerp, lerpAngle } from '../sim/math';
+import { Track } from '../sim/track';
+import { forwardSpeed, type VehicleState } from '../sim/vehicle';
+import { createWorld, PRIZES, stepWorld, type Racer, type RacerEntry, type World, type WorldEvent } from '../sim/world';
 import { Hud, formatTime } from '../ui/hud';
-import { Menus } from '../ui/menus';
+import { Menus, WEAPON_LABEL, type ResultRow } from '../ui/menus';
 
 const DT = 1 / 60;
 const COUNTDOWN = 3;
@@ -33,34 +38,61 @@ interface Snapshot {
 }
 
 const snap = (v: VehicleState): Snapshot => ({ x: v.x, y: v.y, z: v.z, heading: v.heading, pitch: v.pitch, roll: v.roll });
+const hex = (c: number) => `#${c.toString(16).padStart(6, '0')}`;
+
+interface CarView {
+  visual: CarVisual;
+  prev: Snapshot;
+  label: THREE.Sprite | null;
+  smokeTimer: number;
+}
+
+function nameSprite(name: string, color: number): THREE.Sprite {
+  const tex = canvasTexture(256, 64, (ctx) => {
+    ctx.font = 'bold 34px Trebuchet MS, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.lineWidth = 7;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(name, 128, 34);
+    ctx.fillStyle = hex(color);
+    ctx.fillText(name, 128, 34);
+  });
+  const s = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false, transparent: true }));
+  s.scale.set(4.4, 1.1, 1);
+  return s;
+}
 
 export class Game {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
   private rig = new CameraRig();
   private track: Track;
-  private spec: VehicleSpec = VEHICLES.marauder;
-  private car!: VehicleState;
-  private prev!: Snapshot;
-  private progress!: RacerProgress;
-  private visual: CarVisual | null = null;
+  private world!: World;
+  private playerId = 0;
+  private views: CarView[] = [];
+  private effects = new Effects();
+  private vehicleId = 'marauder';
   private carColor = 0x2f7bff;
   private sun: THREE.DirectionalLight;
   private hud: Hud;
   private menus: Menus;
   private controls = new Controls();
   private engine = new EngineSound();
+  private announcer = new Announcer();
   private phase: Phase = 'menu';
   private phaseBeforePause: Phase = 'racing';
-  private raceTime = 0;
   private countdown = 0;
   private accumulator = 0;
   private lastFrame = 0;
   private shake = 0;
   private bounce = 0;
   private bounceVel = 0;
-  private lastInput = emptyInput();
+  private leaderId = -1;
+  private warnedLow = new Set<number>();
+  private resultsTimer = 0;
   private readonly touch = isTouchDevice();
+  private touchEl: HTMLElement | null = null;
   private readonly shadows: boolean;
   private postfx: PostFx | null = null;
   private animated: ((t: number) => void)[] = [];
@@ -102,19 +134,21 @@ export class Game {
     this.scene.add(buildTrackMesh(this.track, theme, this.shadows));
     const scenery = buildScenery(this.track, theme, this.shadows);
     this.scene.add(scenery.group);
+    this.scene.add(this.effects.group);
     this.animated.push(ground.update, scenery.update);
     // bloom só no PC: no celular pesa demais
     if (!this.touch) this.postfx = new PostFx(this.renderer, this.scene);
 
     this.hud = new Hud(root, this.track);
     this.hud.setVisible(false);
-    if (this.touch) createTouchControls(root, this.controls);
+    if (this.touch) this.touchEl = createTouchControls(root, this.controls);
     this.menus = new Menus(root, {
       vehicles: Object.values(VEHICLES),
       onStart: (opts) => {
+        unlockAudio();
         this.engine.start();
         if (this.touch) this.enterFullscreen();
-        this.spec = VEHICLES[opts.vehicleId];
+        this.vehicleId = opts.vehicleId;
         this.carColor = opts.color;
         this.rig.mode = opts.camera;
         this.startRace();
@@ -127,13 +161,14 @@ export class Game {
     this.controls.onUiAction((a) => {
       if (a === 'camera' && this.phase !== 'menu') this.setCamera(this.rig.cycle());
       if (a === 'pause') this.togglePause();
+      if (a === 'mute') this.hud.showToast(toggleMute() ? '🔇 Som desligado' : '🔊 Som ligado');
     });
     window.addEventListener('resize', () => this.resize());
     document.addEventListener('visibilitychange', () => {
       if (document.hidden && (this.phase === 'racing' || this.phase === 'countdown')) this.togglePause();
     });
 
-    this.resetCar();
+    this.createRace();
     this.resize();
     this.menus.showMain();
     requestAnimationFrame((t) => this.frame(t));
@@ -148,30 +183,54 @@ export class Game {
     }
   }
 
-  private resetCar(): void {
-    const p = this.track.pieces[0];
-    // posição de largada logo depois da linha, lado esquerdo do grid
-    const s = 5;
-    const x = p.x0 + Math.sin(p.heading0) * s + leftX(p.heading0) * 2.4;
-    const z = p.z0 + Math.cos(p.heading0) * s + leftZ(p.heading0) * 2.4;
-    this.car = createVehicleState(this.spec, x, z, p.heading0, p.h0);
-    this.prev = snap(this.car);
-    this.progress = createProgress(this.track, this.car);
+  private get player(): Racer {
+    return this.world.racers[this.playerId];
+  }
 
-    if (this.visual) this.scene.remove(this.visual.root);
-    this.visual = createCarMesh(this.carColor, this.shadows);
-    this.scene.add(this.visual.root);
+  /** Monta o grid: os 3 rivais largam na frente, o jogador por último (como no original). */
+  private createRace(): void {
+    const used = new Set([this.carColor]);
+    const spare = [0xe02828, 0xf2c318, 0xb040e0, 0x2f7bff, 0xf0f0f0];
+    const entries: RacerEntry[] = CHEM6_OPPONENTS.map((o) => {
+      let color = o.color;
+      if (used.has(color)) color = spare.find((c) => !used.has(c)) ?? color;
+      used.add(color);
+      return { name: o.name, color, spec: VEHICLES[o.vehicleId], ai: o.ai };
+    });
+    // ?autopilot na URL: o carro do jogador é pilotado pela IA (demonstração/testes)
+    const autopilot = new URLSearchParams(location.search).has('autopilot') ? { skill: 0.85, aggression: 0.8, lane: 0.5 } : null;
+    entries.push({ name: 'Você', color: this.carColor, spec: VEHICLES[this.vehicleId], ai: autopilot });
+    this.playerId = entries.length - 1;
+    // ?laps=N na URL muda o número de voltas (útil para testar)
+    const laps = Number(new URLSearchParams(location.search).get('laps')) || this.track.def.laps;
+    this.world = createWorld(this.track, entries, laps, (Date.now() & 0xffff) + 1);
+
+    for (const v of this.views) {
+      this.scene.remove(v.visual.root);
+      if (v.label) this.scene.remove(v.label);
+    }
+    this.views = this.world.racers.map((r, i) => {
+      const visual = createCarMesh(r.color, this.shadows);
+      this.scene.add(visual.root);
+      const label = i !== this.playerId ? nameSprite(r.name, r.color) : null;
+      if (label) this.scene.add(label);
+      return { visual, prev: snap(r.car), label, smokeTimer: 0 };
+    });
+    this.leaderId = -1;
+    this.warnedLow.clear();
     this.setCamera(this.rig.mode, false);
+    const drop = this.touchEl?.querySelector('[data-a="drop"]');
+    if (drop) drop.textContent = WEAPON_LABEL[this.player.spec.rear].toUpperCase();
   }
 
   private startRace(): void {
-    this.resetCar();
-    this.raceTime = 0;
+    this.createRace();
     this.countdown = COUNTDOWN;
     this.phase = 'countdown';
+    this.resultsTimer = 0;
     this.menus.hideAll();
     this.hud.setVisible(true);
-    this.hud.setLap(1, this.track.def.laps);
+    this.hud.setLap(1, this.world.laps);
     this.hud.message('3', 0, 'count');
   }
 
@@ -190,16 +249,18 @@ export class Game {
       this.phaseBeforePause = this.phase;
       this.phase = 'paused';
       this.engine.silence();
+      window.speechSynthesis?.cancel();
       this.menus.showPause();
     }
   }
 
   private setCamera(mode: CameraMode, toast = true): void {
     this.rig.mode = mode;
-    if (this.visual) {
+    const view = this.views[this.playerId];
+    if (view) {
       const cockpit = mode === 'cockpit';
-      this.visual.cockpit.visible = cockpit;
-      for (const c of this.visual.cabin) c.visible = !cockpit;
+      view.visual.cockpit.visible = cockpit;
+      for (const c of view.visual.cabin) c.visible = !cockpit;
     }
     if (toast) this.hud.showToast(`🎥 ${CAMERA_LABELS[mode]}`);
     this.resize();
@@ -242,108 +303,254 @@ export class Game {
       }
       if (steps === 5) this.accumulator = 0;
     }
-    this.render(simulating ? this.accumulator / DT : 1, frameDt);
+    this.render(simulating ? this.accumulator / DT : 1, frameDt, simulating);
   }
 
   private step(dt: number): void {
-    this.prev = snap(this.car);
-    let input = this.controls.read();
+    this.views.forEach((v, i) => (v.prev = snap(this.world.racers[i].car)));
+    let input: ControlInput = this.controls.read();
     if (this.phase === 'countdown') {
       this.countdown -= dt;
-      const n = Math.ceil(this.countdown);
       if (this.countdown <= 0) {
         this.phase = 'racing';
+        this.world.started = true;
         this.hud.message('VAI!', 1, 'go');
+        this.announcer.say(LINES.start(), true);
       } else {
-        this.hud.message(String(n), 0, 'count');
+        this.hud.message(String(Math.ceil(this.countdown)), 0, 'count');
       }
-      input = { ...emptyInput(), throttle: 0 };
-    } else if (this.phase === 'finished') {
-      input = { ...emptyInput(), brake: 0.3 };
-    }
-    this.lastInput = input;
-
-    stepVehicle(this.car, this.spec, input, this.track, dt);
-
-    if (this.phase === 'racing') {
-      this.raceTime += dt;
-      const laps = this.track.def.laps;
-      const ev = updateProgress(this.progress, this.track, this.car, this.raceTime, laps, dt);
-      if (ev?.type === 'lap') {
-        this.hud.setLap(ev.lap, laps);
-        const last = this.progress.lapTimes[this.progress.lapTimes.length - 1];
-        this.hud.message(ev.lap === laps ? 'VOLTA FINAL!' : `VOLTA ${ev.lap}`, 1.6, 'lap');
-        this.hud.showToast(`Volta: ${formatTime(last)}`);
-        this.car.nitroCharges = this.spec.nitroCharges; // recarrega a cada volta, como no original
-      } else if (ev?.type === 'finish') {
-        this.phase = 'finished';
-        this.hud.message('CHEGADA!', 2.5, 'go');
-        setTimeout(() => {
-          if (this.phase === 'finished') this.menus.showResults(this.progress.lapTimes, this.progress.finishTime);
-        }, 2500);
-      }
-      if (this.progress.wrongWayTime > 1) this.hud.message('CONTRAMÃO!', 0.2, 'warn');
+      input = emptyInput();
     }
 
-    // efeitos de impacto
-    if (this.car.landingImpact > 2) {
-      this.bounceVel -= this.car.landingImpact * 0.12;
-      this.shake = Math.max(this.shake, clamp(this.car.landingImpact / 25, 0, 0.6));
+    stepWorld(this.world, { [this.playerId]: input }, dt);
+    for (const e of this.world.events) this.onEvent(e);
+
+    const p = this.player;
+    if (this.phase === 'racing' && p.progress.wrongWayTime > 1) this.hud.message('CONTRAMÃO!', 0.2, 'warn');
+
+    // quem lidera
+    const leader = this.world.racers.find((r) => r.place === 1)!;
+    if (this.phase === 'racing' && leader.id !== this.leaderId) {
+      if (this.leaderId !== -1 && this.world.raceTime > 5) this.announcer.say(LINES.lead(this.speakName(leader)));
+      this.leaderId = leader.id;
     }
-    if (this.car.wallImpact > 4) this.shake = Math.max(this.shake, clamp(this.car.wallImpact / 30, 0, 0.5));
+    // blindagem baixa
+    for (const r of this.world.racers) {
+      const ratio = r.armor / r.spec.armor;
+      if (r.alive && ratio < 0.3 && !this.warnedLow.has(r.id)) {
+        this.warnedLow.add(r.id);
+        this.announcer.say(LINES.lowArmor(this.speakName(r)));
+      } else if (ratio > 0.6) this.warnedLow.delete(r.id);
+    }
+
+    if (this.phase === 'finished') {
+      this.resultsTimer -= dt;
+      if (this.resultsTimer <= 0 && this.resultsTimer > -dt * 1.5) this.showResults();
+    }
+
+    // efeitos de impacto no carro do jogador
+    const car = p.car;
+    if (car.landingImpact > 2) {
+      this.bounceVel -= car.landingImpact * 0.12;
+      this.shake = Math.max(this.shake, clamp(car.landingImpact / 25, 0, 0.6));
+    }
+    if (car.wallImpact > 4) this.shake = Math.max(this.shake, clamp(car.wallImpact / 30, 0, 0.5));
     this.bounceVel += (-this.bounce * 300 - this.bounceVel * 18) * dt;
     this.bounce += this.bounceVel * dt;
     this.shake *= Math.exp(-dt * 6);
   }
 
-  private render(alpha: number, frameDt: number): void {
-    const v = this.car;
-    const p = this.prev;
-    const visual = this.visual!;
-    const x = lerp(p.x, v.x, alpha);
-    const y = lerp(p.y, v.y, alpha);
-    const z = lerp(p.z, v.z, alpha);
-    const heading = lerpAngle(p.heading, v.heading, alpha);
-    const pitch = lerp(p.pitch, v.pitch, alpha);
-    const roll = lerp(p.roll, v.roll, alpha);
+  /** Nome para o locutor ('' = o próprio jogador). */
+  private speakName(r: Racer): string {
+    return r.id === this.playerId ? '' : r.name;
+  }
 
-    visual.root.position.set(x, y, z);
-    visual.root.rotation.set(-pitch, heading, roll, 'YXZ');
-    visual.body.position.y = clamp(this.bounce, -0.25, 0.15);
-    for (const w of visual.wheels) w.rotation.x = v.wheelSpin;
-    for (const fw of visual.frontWheels) fw.rotation.y = -v.steer * 0.45;
-    visual.steeringWheel.rotation.z = v.steer * 1.6;
-    visual.flame.visible = v.nitroTime > 0;
-    if (visual.flame.visible) visual.flame.scale.setScalar(0.8 + Math.random() * 0.5);
+  /** Volume de um som conforme a distância até o jogador. */
+  private vol(x: number, z: number): number {
+    const c = this.player.car;
+    return clamp(1 - Math.hypot(x - c.x, z - c.z) / 90, 0, 1);
+  }
 
-    visual.root.updateMatrixWorld();
+  private onEvent(e: WorldEvent): void {
+    const racers = this.world.racers;
+    const me = this.playerId;
+    const name = (id: number) => (id === me ? 'Você' : racers[id].name);
+    switch (e.type) {
+      case 'fire':
+        if (e.kind === 'laser') sfxLaser(this.vol(e.x, e.z));
+        else sfxMissile(this.vol(e.x, e.z));
+        this.effects.sparks(e.x, e.y, e.z, 4);
+        break;
+      case 'drop': {
+        const c = racers[e.racer].car;
+        sfxDrop(this.vol(c.x, c.z));
+        break;
+      }
+      case 'hit':
+        if (e.kind === 'laser') {
+          this.effects.sparks(e.x, e.y, e.z, 12);
+          sfxHit(this.vol(e.x, e.z));
+        } else {
+          this.effects.explosion(e.x, e.y - 0.8, e.z, false);
+          sfxExplosion(this.vol(e.x, e.z), false);
+        }
+        if (e.target === me) this.shake = Math.max(this.shake, e.kind === 'laser' ? 0.25 : 0.7);
+        break;
+      case 'impact':
+        this.effects.sparks(e.x, e.y, e.z, e.kind === 'missile' ? 14 : 6);
+        if (e.kind === 'missile') {
+          this.effects.explosion(e.x, e.y - 0.8, e.z, false);
+          sfxExplosion(this.vol(e.x, e.z) * 0.7, false);
+        }
+        break;
+      case 'spin':
+        if (e.racer === me) this.hud.showToast('Óleo! 🌀');
+        break;
+      case 'explode': {
+        this.effects.explosion(e.x, e.y, e.z, true);
+        sfxExplosion(this.vol(e.x, e.z), true);
+        if (e.racer === me) {
+          this.shake = 1.2;
+          this.hud.message('DESTRUÍDO!', 2, 'warn');
+        } else if (e.by === me) {
+          this.hud.showToast(`💥 Você destruiu ${racers[e.racer].name}!`);
+        } else {
+          this.hud.showToast(`💥 ${name(e.racer)} explodiu!`);
+        }
+        this.announcer.say(LINES.explode(this.speakName(racers[e.racer])), true);
+        break;
+      }
+      case 'pickup':
+        if (e.racer === me) {
+          sfxPickup(e.kind);
+          this.hud.showToast(e.kind === 'money' ? '+ $1.000' : '+ Blindagem');
+        }
+        break;
+      case 'bump':
+        if (e.a === me || e.b === me) {
+          sfxBump(clamp(e.strength / 15, 0, 1));
+          this.shake = Math.max(this.shake, clamp(e.strength / 40, 0, 0.3));
+        }
+        break;
+      case 'lap':
+        if (e.racer === me) {
+          const laps = this.world.laps;
+          this.hud.setLap(e.lap, laps);
+          const times = this.player.progress.lapTimes;
+          this.hud.message(e.lap === laps ? 'VOLTA FINAL!' : `VOLTA ${e.lap}`, 1.6, 'lap');
+          this.hud.showToast(`Volta: ${formatTime(times[times.length - 1])} · armas recarregadas`);
+          if (e.lap === laps) this.announcer.say(LINES.finalLap(), true);
+        }
+        break;
+      case 'finish':
+        if (e.place === 1) this.announcer.say(LINES.winner(this.speakName(racers[e.racer])), true);
+        if (e.racer === me) {
+          this.phase = 'finished';
+          this.hud.message(e.place === 1 ? 'VITÓRIA!' : `${e.place}º LUGAR`, 3, 'go');
+          this.resultsTimer = 3;
+        }
+        break;
+      case 'respawn':
+        break;
+    }
+  }
+
+  private showResults(): void {
+    const order = [...this.world.racers].sort((a, b) => a.place - b.place);
+    const rows: ResultRow[] = order.map((r) => ({
+      place: r.place,
+      name: r.id === this.playerId ? 'Você' : r.name,
+      color: hex(r.color),
+      time: r.finishPlace ? r.progress.finishTime : null,
+      kills: r.kills,
+      prize: PRIZES[r.place - 1] ?? 0,
+      money: r.money,
+      me: r.id === this.playerId,
+    }));
+    this.hud.clearMessage();
+    this.menus.showResults(rows, this.player.progress.lapTimes);
+  }
+
+  private render(alpha: number, frameDt: number, simulating: boolean): void {
+    const world = this.world;
+    let playerPose: { x: number; y: number; z: number; heading: number } | null = null;
+
+    world.racers.forEach((r, i) => {
+      const view = this.views[i];
+      const v = r.car;
+      const p = view.prev;
+      const x = lerp(p.x, v.x, alpha);
+      const y = lerp(p.y, v.y, alpha);
+      const z = lerp(p.z, v.z, alpha);
+      const heading = lerpAngle(p.heading, v.heading, alpha);
+      const visual = view.visual;
+      visual.root.visible = r.alive && (r.invuln <= 0 || Math.sin(this.clock * 30) > -0.3);
+      visual.root.position.set(x, y, z);
+      visual.root.rotation.set(-lerp(p.pitch, v.pitch, alpha), heading, lerp(p.roll, v.roll, alpha), 'YXZ');
+      for (const w of visual.wheels) w.rotation.x = v.wheelSpin;
+      for (const fw of visual.frontWheels) fw.rotation.y = -v.steer * 0.45;
+      visual.flame.visible = r.alive && v.nitroTime > 0;
+      if (visual.flame.visible) visual.flame.scale.setScalar(0.8 + Math.random() * 0.5);
+      if (view.label) {
+        view.label.visible = r.alive;
+        view.label.position.set(x, y + 3, z);
+      }
+      // fumaça (e fogo) quando a blindagem está baixa
+      const ratio = r.armor / r.spec.armor;
+      if (r.alive && ratio < 0.5 && simulating) {
+        view.smokeTimer -= frameDt;
+        if (view.smokeTimer <= 0) {
+          view.smokeTimer = ratio < 0.25 ? 0.04 : 0.1;
+          this.effects.puff(x, y + 1.2, z, ratio < 0.25 ? 0x1a1a1a : 0x4a4a4a, 0.8);
+          if (ratio < 0.25) this.effects.flame(x, y + 1.1, z);
+        }
+      }
+      if (i === this.playerId) {
+        visual.body.position.y = clamp(this.bounce, -0.25, 0.15);
+        visual.steeringWheel.rotation.z = v.steer * 1.6;
+        playerPose = { x, y, z, heading };
+      }
+    });
+
+    const pv = this.views[this.playerId].visual;
+    const pose = playerPose ?? { x: 0, y: 0, z: 0, heading: 0 };
+    pv.root.updateMatrixWorld();
+    const pc = this.player.car;
     this.rig.update(
       {
-        position: new THREE.Vector3(x, y, z),
-        quaternion: visual.root.quaternion,
-        heading,
-        velocity: new THREE.Vector3(v.vx, v.vy, v.vz),
+        position: new THREE.Vector3(pose.x, pose.y, pose.z),
+        quaternion: pv.root.quaternion,
+        heading: pose.heading,
+        velocity: new THREE.Vector3(pc.vx, pc.vy, pc.vz),
         shake: this.shake,
       },
       frameDt,
     );
+    this.effects.update(world, simulating ? frameDt : 0, simulating ? this.accumulator : 0);
 
-    this.sun.position.set(x + 40, y + 70, z - 30);
-    this.sun.target.position.set(x, y, z);
+    this.sun.position.set(pose.x + 40, pose.y + 70, pose.z - 30);
+    this.sun.target.position.set(pose.x, pose.y, pose.z);
     this.sky.position.copy(this.rig.active.position);
 
-    const speed = forwardSpeed(v);
+    const r = this.player;
+    const speed = forwardSpeed(pc);
     if (this.phase !== 'menu' && this.phase !== 'paused') {
       this.hud.update(frameDt, {
-        time: this.raceTime,
-        best: this.progress.lapTimes.length ? Math.min(...this.progress.lapTimes) : null,
+        time: world.raceTime,
+        best: r.progress.lapTimes.length ? Math.min(...r.progress.lapTimes) : null,
         speedKmh: speed * 3.6,
-        nitro: v.nitroCharges,
-        nitroMax: this.spec.nitroCharges,
-        boosting: v.nitroTime > 0,
-        cars: [{ x: v.x, z: v.z, color: `#${this.carColor.toString(16).padStart(6, '0')}` }],
+        place: r.place,
+        total: world.racers.length,
+        armor: r.armor / r.spec.armor,
+        money: r.money,
+        front: { label: WEAPON_LABEL[r.spec.front].toUpperCase(), n: r.frontCharges, max: r.spec.frontCharges },
+        rear: { label: WEAPON_LABEL[r.spec.rear].toUpperCase(), n: r.rearCharges, max: r.spec.rearCharges },
+        nitro: pc.nitroCharges,
+        nitroMax: r.spec.nitroCharges,
+        boosting: pc.nitroTime > 0,
+        cars: world.racers.filter((o) => o.alive).map((o) => ({ x: o.car.x, z: o.car.z, color: hex(o.color), me: o.id === this.playerId })),
       });
-      this.engine.update(clamp(Math.abs(speed) / this.spec.maxSpeed, 0, 1.3), this.lastInput.throttle, v.nitroTime > 0);
+      this.engine.update(clamp(Math.abs(speed) / r.spec.maxSpeed, 0, 1.3), r.alive ? r.lastInput.throttle : 0, pc.nitroTime > 0);
     }
 
     const w = this.root.clientWidth;

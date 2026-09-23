@@ -16,6 +16,19 @@ interface MenuCallbacks {
   onMenu: () => void;
 }
 
+export interface ResultRow {
+  place: number;
+  name: string;
+  color: string;
+  time: number | null;
+  kills: number;
+  prize: number;
+  money: number;
+  me: boolean;
+}
+
+export const WEAPON_LABEL = { laser: 'Laser', missile: 'Míssil', mine: 'Mina', oil: 'Óleo' } as const;
+
 const COLORS = [0x2f7bff, 0xe02828, 0x2fc840, 0xf2c318, 0xb040e0, 0xf0f0f0];
 
 function stat(label: string, value: number): string {
@@ -36,16 +49,18 @@ export class Menus {
     const maxSpeed = Math.max(...cb.vehicles.map((v) => v.maxSpeed));
     const maxAccel = Math.max(...cb.vehicles.map((v) => v.accel));
     const maxGrip = Math.max(...cb.vehicles.map((v) => v.grip));
+    const maxArmor = Math.max(...cb.vehicles.map((v) => v.armor));
     this.main.innerHTML = `
       <div class="card">
         <h1>ROCK <span>'N'</span> ROLL<br/>RACING <em>3D</em></h1>
-        <p class="sub">Protótipo — Chem VI, Pista 1</p>
+        <p class="sub">Chem VI, Divisão B — você contra Rip, Shred e Viper Mackay</p>
         <h3>Carro</h3>
         <div class="cars">
           ${cb.vehicles
             .map(
               (v) => `<button class="car" data-id="${v.id}"><b>${v.name}</b>
-                ${stat('Velocidade', v.maxSpeed / maxSpeed)}${stat('Aceleração', v.accel / maxAccel)}${stat('Aderência', v.grip / maxGrip)}
+                ${stat('Velocidade', v.maxSpeed / maxSpeed)}${stat('Aceleração', v.accel / maxAccel)}${stat('Aderência', v.grip / maxGrip)}${stat('Blindagem', v.armor / maxArmor)}
+                <em>${WEAPON_LABEL[v.front]} + ${WEAPON_LABEL[v.rear]}</em>
               </button>`,
             )
             .join('')}
@@ -62,9 +77,9 @@ export class Menus {
         <details class="help">
           <summary>Controles</summary>
           <p><b>Teclado:</b> ↑/W acelera · ↓/S freia/ré · ←→/A D vira · Shift nitro · C troca câmera · Esc pausa</p>
-          <p><b>Controle:</b> RT acelera · LT freia · analógico vira · L3/R3 nitro · Y câmera · Start pausa</p>
+          <p><b>Controle:</b> RT acelera · LT freia · analógico vira · X/RB atira · B/LB arma traseira · L3/R3 nitro · Y câmera · Start pausa</p>
           <p><b>Celular:</b> botões na tela; 🎥 troca a câmera. Melhor com o aparelho deitado.</p>
-          <p class="muted">Armas (tiro e mina) entram na próxima etapa.</p>
+          <p><b>Armas:</b> Espaço/J atira (arma frontal) · X/K solta a arma traseira (mina ou óleo). Cargas e nitro recarregam a cada volta. M liga/desliga o som.</p>
         </details>
       </div>`;
     this.pause.innerHTML = `
@@ -130,16 +145,28 @@ export class Menus {
     this.pause.style.display = '';
   }
 
-  showResults(lapTimes: number[], total: number): void {
+  showResults(rows: ResultRow[], lapTimes: number[]): void {
     this.hideAll();
-    const best = Math.min(...lapTimes);
+    const best = lapTimes.length ? Math.min(...lapTimes) : 0;
+    const me = rows.find((r) => r.me);
     this.results.innerHTML = `
-      <div class="card small">
-        <h2>RESULTADO</h2>
+      <div class="card small results">
+        <h2>${me && me.place === 1 ? 'VITÓRIA!' : 'RESULTADO'}</h2>
         <table>
-          ${lapTimes.map((t, i) => `<tr class="${t === best ? 'best' : ''}"><td>Volta ${i + 1}</td><td>${formatTime(t)}</td></tr>`).join('')}
-          <tr class="total"><td>Total</td><td>${formatTime(total)}</td></tr>
+          <tr><th>#</th><th>Piloto</th><th>Tempo</th><th>Abates</th><th>Prêmio</th></tr>
+          ${rows
+            .map(
+              (r) => `<tr class="${r.me ? 'me' : ''}"><td>${r.place}º</td><td><span class="dot" style="background:${r.color}"></span>${r.name}</td>
+                <td>${r.time !== null ? formatTime(r.time) : '—'}</td><td>${r.kills}</td><td>$${r.prize.toLocaleString('pt-BR')}</td></tr>`,
+            )
+            .join('')}
         </table>
+        ${
+          lapTimes.length
+            ? `<table>${lapTimes.map((t, i) => `<tr class="${t === best ? 'best' : ''}"><td>Volta ${i + 1}</td><td>${formatTime(t)}</td></tr>`).join('')}</table>`
+            : ''
+        }
+        ${me ? `<p class="money">Seu dinheiro nesta corrida: <b>$${me.money.toLocaleString('pt-BR')}</b></p>` : ''}
         <button class="go" data-act="restart">Correr de novo</button>
         <button data-act="menu">Menu principal</button>
       </div>`;

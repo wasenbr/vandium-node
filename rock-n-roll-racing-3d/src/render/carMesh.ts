@@ -73,7 +73,7 @@ export function createCarMesh(color: number, shadows: boolean): CarVisual {
   const paint = new THREE.MeshPhysicalMaterial({ color, metalness: 0.55, roughness: 0.32, clearcoat: 1, clearcoatRoughness: 0.08 });
   const trim = new THREE.MeshStandardMaterial({ color: 0x141418, metalness: 0.5, roughness: 0.55 });
   const glass = new THREE.MeshPhysicalMaterial({ color: 0x0a0f16, metalness: 0.2, roughness: 0.05, clearcoat: 1, transparent: true, opacity: 0.88 });
-  const chrome = new THREE.MeshStandardMaterial({ color: 0xd8dde4, metalness: 1, roughness: 0.18 });
+  const chrome = new THREE.MeshStandardMaterial({ color: 0xb8bdc4, metalness: 1, roughness: 0.35, envMapIntensity: 0.5 });
   const gunMetal = new THREE.MeshStandardMaterial({ color: 0x3a3e44, metalness: 0.9, roughness: 0.35 });
 
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, x: number, y: number, z: number, parent: THREE.Object3D = body) => {
@@ -112,13 +112,13 @@ export function createCarMesh(color: number, shadows: boolean): CarVisual {
   }
   // escapamentos
   for (const sx of [-0.55, 0.55]) {
-    const ex = add(new THREE.CylinderGeometry(0.08, 0.08, 0.35, 10), chrome, sx, 0.5, -2.3);
+    const ex = add(new THREE.CylinderGeometry(0.08, 0.08, 0.35, 10), gunMetal, sx, 0.5, -2.3);
     ex.rotation.x = Math.PI / 2;
   }
 
   // luzes (emissivas — brilham com o bloom no PC)
-  const head = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2c8, emissiveIntensity: 5 });
-  const tail = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff1a10, emissiveIntensity: 5 });
+  const head = new THREE.MeshStandardMaterial({ color: 0xffffff, emissive: 0xfff2c8, emissiveIntensity: 3 });
+  const tail = new THREE.MeshStandardMaterial({ color: 0x400000, emissive: 0xff1a10, emissiveIntensity: 2.5 });
   for (const sx of [-0.68, 0.68]) {
     add(new THREE.BoxGeometry(0.38, 0.1, 0.06), head, sx, 0.72, 2.2).rotation.x = -0.6;
     add(new THREE.BoxGeometry(0.45, 0.12, 0.05), tail, sx, 0.82, -2.21);
