@@ -46,7 +46,7 @@ export interface MenuActions {
   setCamera(mode: CameraMode): void;
   openSettings(): void;
   closeSettings(): void;
-  setAudio(key: 'music' | 'sfx' | 'announcer' | 'retro', on: boolean): void;
+  setAudio(key: 'music' | 'sfx' | 'announcer', on: boolean): void;
   setMusicVolume(v: number): void;
   addMusic(files: File[]): void;
   clearMusic(): void;
@@ -57,7 +57,6 @@ export interface AudioSettings {
   music: boolean;
   sfx: boolean;
   announcer: boolean;
-  retro: boolean;
   musicVolume: number;
   bundled: number;
   user: number;
@@ -165,7 +164,7 @@ export class Menus {
           <button class="${hasSave ? '' : 'go'}" data-act="new">Nova campanha</button>
           <button data-act="quick">Corrida rápida</button>
           <button data-act="password">Carregar senha</button>
-          <button data-act="settings">⚙ Ajustes (visual, som e música)</button>
+          <button data-act="settings">⚙ Som e música</button>
         </div>
         ${this.helpBlock()}
       </div>`);
@@ -338,8 +337,7 @@ export class Menus {
     const total = a.bundled + a.user;
     this.show(`
       <div class="card small">
-        <h2>AJUSTES</h2>
-        <div class="shop-row"><div><b>Visual</b><small>16-bit imita o SNES / Definitive Edition; HD usa a resolução do aparelho</small></div><button class="toggle on" data-toggle="retro" data-on="${a.retro ? 1 : 0}">${a.retro ? '16-BIT' : 'HD'}</button></div>
+        <h2>SOM E MÚSICA</h2>
         ${toggle('music', 'Música', a.music)}
         <div class="shop-row"><div><b>Volume da música</b></div><input class="vol" type="range" min="0" max="100" value="${Math.round(a.musicVolume * 100)}"/></div>
         ${toggle('sfx', 'Efeitos sonoros', a.sfx)}
@@ -445,7 +443,7 @@ export class Menus {
       this.showShop(this.lastHub);
       return;
     }
-    if (d.toggle) this.actions.setAudio(d.toggle as 'music' | 'sfx' | 'announcer' | 'retro', d.on !== '1');
+    if (d.toggle) this.actions.setAudio(d.toggle as 'music' | 'sfx' | 'announcer', d.on !== '1');
     if (d.upgrade) this.actions.buyUpgrade(d.upgrade as UpgradeKind);
     if (d.charge) this.actions.buyCharge(d.charge as ChargeKind);
     if (d.buycar) this.actions.buyCar(d.buycar);

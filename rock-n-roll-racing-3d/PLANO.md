@@ -26,8 +26,8 @@ divisões) com duas câmeras principais:
 ### Estilo visual (revisado)
 - Carros pequenos em pistas largas (pista de 13 m, carros em escala 0,8), como no original.
 - Câmera isométrica clássica 2:1 da pixel art (30° de elevação), mostrando as laterais dos blocos.
-- Modo **16-bit** (padrão): renderização em ~270 linhas ampliada com pixels nítidos, paleta
-  reduzida e pontilhado — aproxima o visual do SNES / Definitive Edition. Modo **HD** opcional.
+- Visual **realista inspirado no original** (não pixel art): materiais PBR com relevo procedural,
+  reflexos do céu de cada planeta, líquidos refletivos e sombras de contato.
 - Referências de imagem do original ainda não puderam ser consultadas daqui (sites bloqueados);
   capturas de tela em `referencias/` ajudariam a afinar cores e proporções.
 

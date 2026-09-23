@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { createRng, forwardX, forwardZ, leftX, leftZ } from '../sim/math';
 import { JUMP_HEIGHT, type CenterPoint, type Track } from '../sim/track';
+import { asphaltNormal, asphaltRoughness, concreteNormal } from './textures';
 import type { Theme } from './themes';
 
 export function canvasTexture(w: number, h: number, draw: (ctx: CanvasRenderingContext2D) => void, color = true): THREE.CanvasTexture {
@@ -26,7 +27,7 @@ function speckle(ctx: CanvasRenderingContext2D, w: number, h: number, count: num
 }
 
 /** Asfalto escuro com bordas coloridas (Chem VI: preto e vermelho, como no original). */
-function roadTextures(theme: Theme): { map: THREE.Texture; bump: THREE.Texture } {
+function roadTextures(theme: Theme): { map: THREE.Texture } {
   const S = 512;
   const map = canvasTexture(S, S, (ctx) => {
     ctx.fillStyle = theme.road;
@@ -67,17 +68,7 @@ function roadTextures(theme: Theme): { map: THREE.Texture; bump: THREE.Texture }
     ctx.globalAlpha = 1;
     speckle(ctx, S, S, 3000, 0.25, 3);
   });
-  const bump = canvasTexture(
-    256,
-    256,
-    (ctx) => {
-      ctx.fillStyle = '#808080';
-      ctx.fillRect(0, 0, 256, 256);
-      speckle(ctx, 256, 256, 12000, 0.9, 4);
-    },
-    false,
-  );
-  return { map, bump };
+  return { map };
 }
 
 function railTexture(theme: Theme): THREE.CanvasTexture {
@@ -232,16 +223,23 @@ export function buildTrackMesh(track: Track, theme: Theme, shadows: boolean): TH
   const G = theme.groundLevel;
 
   // Asfalto
-  const { map, bump } = roadTextures(theme);
+  const { map } = roadTextures(theme);
   const road = new THREE.Mesh(
     sweep(pts, [{ l: W, y: 0 }, { l: -W, y: 0 }], W * 2, W * 2),
-    new THREE.MeshStandardMaterial({ map, bumpMap: bump, bumpScale: 0.6, roughness: 0.78, metalness: 0.05 }),
+    new THREE.MeshStandardMaterial({
+      map,
+      normalMap: asphaltNormal(),
+      normalScale: new THREE.Vector2(0.7, 0.7),
+      roughnessMap: asphaltRoughness(),
+      roughness: 1,
+      metalness: 0,
+    }),
   );
   road.receiveShadow = shadows;
   group.add(road);
 
   // Muretas com espessura (face interna, topo, face externa)
-  const railMat = new THREE.MeshStandardMaterial({ map: railTexture(theme), roughness: 0.45, metalness: 0.55 });
+  const railMat = new THREE.MeshStandardMaterial({ map: railTexture(theme), normalMap: concreteNormal(), normalScale: new THREE.Vector2(0.4, 0.4), roughness: 0.5, metalness: 0.45 });
   for (const side of [1, -1]) {
     const i = side * W;
     const o = side * (W + RAIL_THICK);
@@ -260,7 +258,7 @@ export function buildTrackMesh(track: Track, theme: Theme, shadows: boolean): TH
 
   // Laterais do bloco da pista descendo até o terreno
   const concrete = concreteTexture(theme.skirt);
-  const skirtMat = new THREE.MeshStandardMaterial({ map: concrete, roughness: 0.95 });
+  const skirtMat = new THREE.MeshStandardMaterial({ map: concrete, normalMap: concreteNormal(), normalScale: new THREE.Vector2(1.2, 1.2), roughness: 0.92 });
   for (const side of [1, -1]) {
     const o = side * (W + RAIL_THICK);
     const profile: ProfilePoint[] = [
@@ -285,7 +283,7 @@ export function buildTrackMesh(track: Track, theme: Theme, shadows: boolean): TH
 function addPillars(group: THREE.Group, track: Track, theme: Theme, shadows: boolean): void {
   const pts = track.sampleCenterline(14);
   const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshStandardMaterial({ map: concreteTexture(theme.skirt), roughness: 0.9 });
+  const mat = new THREE.MeshStandardMaterial({ map: concreteTexture(theme.skirt), normalMap: concreteNormal(), roughness: 0.9 });
   const mesh = new THREE.InstancedMesh(geo, mat, pts.length * 2);
   const m = new THREE.Matrix4();
   const q = new THREE.Quaternion();

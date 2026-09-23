@@ -16,15 +16,16 @@ import { Controls, createTouchControls, isTouchDevice } from '../input/controls'
 import { CAMERA_LABELS, CameraRig, type CameraMode } from '../render/cameras';
 import { createCarMesh, type CarVisual } from '../render/cars';
 import { Effects } from '../render/effects';
-import { buildEnvironment, buildGround, buildSky } from '../render/environment';
-import { PostFx, RETRO_ROWS } from '../render/postfx';
+import { buildEnvironment, buildGround, buildSky, SUN_DIR } from '../render/environment';
+import { contactShadow } from '../render/textures';
+import { PostFx } from '../render/postfx';
 import { buildScenery } from '../render/scenery';
 import { THEMES } from '../render/themes';
 import { buildTrackMesh, canvasTexture } from '../render/trackMesh';
 import { emptyInput, type ControlInput } from '../sim/input';
 import { clamp, lerp, lerpAngle } from '../sim/math';
 import { Track, type TrackDef } from '../sim/track';
-import { forwardSpeed, type VehicleSpec, type VehicleState } from '../sim/vehicle';
+import { CAR_SCALE, forwardSpeed, type VehicleSpec, type VehicleState } from '../sim/vehicle';
 import { createWorld, PRIZES, stepWorld, type Racer, type RacerEntry, type World, type WorldEvent } from '../sim/world';
 import type { AiProfile } from '../sim/ai';
 import { Hud, formatTime } from '../ui/hud';
@@ -59,6 +60,8 @@ interface RaceSetup {
 }
 
 interface CarView {
+  /** sombra de contato (mancha escura sob o carro, também no celular) */
+  shadow: THREE.Mesh;
   visual: CarVisual;
   prev: Snapshot;
   label: THREE.Sprite | null;
@@ -92,7 +95,7 @@ export class Game {
   private level: THREE.Group | null = null;
   private hemi: THREE.HemisphereLight;
   private resultsShown = false;
-  private prefs = loadPrefs({ camera: 'iso' as CameraMode, music: true, sfx: true, announcer: true, musicVolume: 0.7, retro: true });
+  private prefs = loadPrefs({ camera: 'iso' as CameraMode, music: true, sfx: true, announcer: true, musicVolume: 0.7 });
   private music = new Music();
   /** tela de menu atual (para voltar depois das configurações de som) */
   private screen: 'main' | 'hub' = 'main';
@@ -119,9 +122,10 @@ export class Game {
   private readonly touch = isTouchDevice();
   private touchEl: HTMLElement | null = null;
   private readonly shadows: boolean;
-  private postfx: PostFx;
+  private postfx: PostFx | null = null;
   private animated: ((t: number) => void)[] = [];
   private sky: THREE.Mesh | null = null;
+  private shadowGeo = new THREE.PlaneGeometry(2.7 * CAR_SCALE, 5 * CAR_SCALE).rotateX(-Math.PI / 2);
   private clock = 0;
 
   constructor(private root: HTMLElement) {
@@ -133,12 +137,11 @@ export class Game {
     this.renderer.toneMappingExposure = 1.2;
     root.appendChild(this.renderer.domElement);
 
-    this.scene.environment = buildEnvironment(this.renderer);
-    this.scene.environmentIntensity = 0.45;
+    this.scene.environmentIntensity = 0.8;
     this.hemi = new THREE.HemisphereLight(0xffffff, 0x202020, 1.35);
     this.sun = new THREE.DirectionalLight(0xffffff, 2.5);
     this.sun.castShadow = this.shadows;
-    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.mapSize.set(this.touch ? 1024 : 4096, this.touch ? 1024 : 4096);
     this.sun.shadow.bias = -0.0004;
     this.sun.shadow.normalBias = 0.03;
     const sc = this.sun.shadow.camera;
@@ -147,7 +150,8 @@ export class Game {
     sc.near = 1;
     sc.far = 220;
     this.scene.add(this.hemi, this.sun, this.sun.target, this.effects.group);
-    this.postfx = new PostFx(this.renderer, this.scene);
+    // bloom só no PC: no celular pesa demais
+    if (!this.touch) this.postfx = new PostFx(this.renderer, this.scene);
 
     this.hud = new Hud(root);
     this.hud.setVisible(false);
@@ -219,6 +223,9 @@ export class Game {
       });
     }
     this.level = new THREE.Group();
+    const oldEnv = this.scene.environment;
+    this.scene.environment = buildEnvironment(this.renderer, theme);
+    oldEnv?.dispose();
     this.sky = buildSky(theme);
     this.level.add(this.sky);
     this.scene.fog = new THREE.Fog(theme.fog, 170, 480);
@@ -290,6 +297,7 @@ export class Game {
     this.world = createWorld(this.track, entries, laps, (Date.now() & 0xffff) + 1, setup.prizes);
 
     for (const v of this.views) {
+      this.scene.remove(v.shadow);
       this.scene.remove(v.visual.root);
       if (v.label) this.scene.remove(v.label);
     }
@@ -298,7 +306,13 @@ export class Game {
       this.scene.add(visual.root);
       const label = i !== this.playerId ? nameSprite(r.name, r.color) : null;
       if (label) this.scene.add(label);
-      return { visual, prev: snap(r.car), label, smokeTimer: 0 };
+      const shadow = new THREE.Mesh(
+        this.shadowGeo,
+        new THREE.MeshBasicMaterial({ map: contactShadow(), transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4 }),
+      );
+      shadow.renderOrder = 1;
+      this.scene.add(shadow);
+      return { visual, prev: snap(r.car), label, smokeTimer: 0, shadow };
     });
     this.leaderId = -1;
     this.warnedLow.clear();
@@ -360,15 +374,10 @@ export class Game {
   private resize(): void {
     const w = this.root.clientWidth;
     const h = this.root.clientHeight;
-    // 16-bit: poucas linhas de resolução, ampliadas com pixels nítidos. HD: resolução do aparelho.
-    const retro = this.prefs.retro;
-    const pr = retro ? Math.min(1, RETRO_ROWS / h) : Math.min(window.devicePixelRatio, this.touch ? 1.5 : 2);
+    const pr = Math.min(window.devicePixelRatio, this.touch ? 1.5 : 2);
     this.renderer.setPixelRatio(pr);
     this.renderer.setSize(w, h);
-    this.renderer.domElement.style.imageRendering = retro ? 'pixelated' : 'auto';
-    // bloom só no PC (no celular pesa demais); o filtro 16-bit é barato e vale nos dois
-    this.postfx.configure({ bloom: !this.touch, retro });
-    this.postfx.setSize(w, h, pr);
+    this.postfx?.setSize(w, h, pr);
     this.rig.resize(w, h);
     const mirror = this.mirrorRect();
     this.hud.setMirror(this.rig.mode === 'cockpit' && this.phase !== 'menu', mirror);
@@ -630,7 +639,6 @@ export class Game {
       music: this.prefs.music,
       sfx: this.prefs.sfx,
       announcer: this.prefs.announcer,
-      retro: this.prefs.retro,
       musicVolume: this.prefs.musicVolume,
       bundled: this.music.bundledCount,
       user: this.music.userCount,
@@ -710,11 +718,10 @@ export class Game {
         else if (this.screen === 'hub' && this.campaign) this.menus.showHub(this.hubData());
         else this.menus.showMain(!!this.campaign);
       },
-      setAudio: (key: 'music' | 'sfx' | 'announcer' | 'retro', on: boolean) => {
+      setAudio: (key: 'music' | 'sfx' | 'announcer', on: boolean) => {
         this.prefs[key] = on;
         savePrefs(this.prefs);
-        if (key === 'retro') this.resize();
-        else if (key === 'music') {
+        if (key === 'music') {
           this.music.setEnabled(on);
           if (on) this.music.play(this.track.def.theme, this.phase === 'paused' ? 'pause' : 'menu');
         } else if (key === 'sfx') setSfxEnabled(on);
@@ -771,6 +778,14 @@ export class Game {
         f.visible = r.alive && v.nitroTime > 0;
         if (f.visible) f.scale.setScalar(0.8 + Math.random() * 0.5);
       }
+      // sombra de contato no chão, some conforme o carro sobe num salto
+      const ground = world.track.query(x, z, v.pieceIndex).height;
+      const lift = y - ground;
+      view.shadow.visible = r.alive;
+      view.shadow.position.set(x, ground + 0.03, z);
+      view.shadow.rotation.y = heading;
+      (view.shadow.material as THREE.MeshBasicMaterial).opacity = clamp(1 - lift / 4, 0, 1);
+      view.shadow.scale.setScalar(1 + lift * 0.08);
       if (view.label) {
         view.label.visible = r.alive;
         view.label.position.set(x, y + 2.6, z);
@@ -809,7 +824,7 @@ export class Game {
     );
     this.effects.update(world, simulating ? frameDt : 0, simulating ? this.accumulator : 0);
 
-    this.sun.position.set(pose.x + 40, pose.y + 70, pose.z - 30);
+    this.sun.position.set(pose.x, pose.y, pose.z).addScaledVector(SUN_DIR, 90);
     this.sun.target.position.set(pose.x, pose.y, pose.z);
     this.sky?.position.copy(this.rig.active.position);
 
@@ -838,7 +853,7 @@ export class Game {
     const h = this.root.clientHeight;
     this.renderer.setScissorTest(false);
     this.renderer.setViewport(0, 0, w, h);
-    if (this.prefs.retro || !this.touch) this.postfx.render(this.rig.active);
+    if (this.postfx) this.postfx.render(this.rig.active);
     else this.renderer.render(this.scene, this.rig.active);
 
     if (this.rig.mode === 'cockpit' && this.phase !== 'menu') {
