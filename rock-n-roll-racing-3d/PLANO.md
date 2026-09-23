@@ -11,6 +11,16 @@ divisões) com duas câmeras principais:
 > Este projeto é independente do pacote `vandium` que está na raiz do repositório.
 > Tem seu próprio `package.json` e não altera nada fora desta pasta.
 
+## Decisões tomadas
+
+- **Uso pessoal**, não comercial → mantemos nomes, carros, planetas e personagens originais.
+- **Plataforma:** navegador, no **PC e no celular** (controles de toque na tela).
+- **Multiplayer online fica para a v2.** A simulação já é separada da renderização e
+  trabalha só com `ControlInput` por passo fixo — é exatamente o que o servidor vai trocar no online.
+- **Visual:** 3D mais realista, **tudo gerado por código** (sem modelos externos):
+  materiais PBR, reflexos, tone mapping ACES, sombras e bloom no PC.
+- **Pistas:** o mais fiéis possível às originais.
+
 ---
 
 ## 1. Stack técnica proposta
@@ -21,7 +31,7 @@ divisões) com duas câmeras principais:
 | Linguagem | TypeScript | Tipagem ajuda muito em lógica de jogo |
 | Build | Vite | Hot reload rápido |
 | Render 3D | Three.js | Maduro, leve, ótimo para câmera ortográfica + perspectiva |
-| Física | Física *arcade* própria (raycast por roda) + Rapier (WASM) só para colisões carro×carro/parede | Carros do RnRR não são simulação; precisam de controle "arcade" responsivo |
+| Física | Física *arcade* própria, determinística, passo fixo de 60 Hz | Carros do RnRR não são simulação; precisam de controle "arcade" responsivo — e determinismo facilita o online |
 | Áudio | Web Audio API (via Howler.js) | Música, efeitos, locutor |
 | Entrada | Teclado + Gamepad API | Split‑screen local com 2 controles |
 | Testes | Vitest (lógica: regras de corrida, economia, IA) | |
@@ -118,6 +128,17 @@ As pistas do original são grades de blocos isométricos com altura. Vamos usar 
 - Pista = **grade de tiles** em JSON: `{ tipo, rotação, altura, tema, perigo }`.
 - Tipos: reta, curva, rampa ↑/↓, salto, lombada, curva inclinada, cruzamento, ponte, largada.
 - Um **gerador** transforma o JSON em malha 3D + colisores + checkpoints + linha de corrida da IA.
+- Implementado: peças `F S L R U D J B` (largada, reta, curvas, rampas, salto, lombadas) em
+  `src/sim/track.ts`; teste automático garante que todo circuito fecha.
+
+### Fidelidade às pistas originais
+Para reproduzir o traçado exato de cada pista preciso dos mapas de referência. Os sites de mapas
+(ex.: vgmaps.de, que tem todas as pistas do SNES) estão bloqueados no ambiente onde eu trabalho.
+Caminho proposto:
+1. Salvar os mapas/capturas das pistas em `rock-n-roll-racing-3d/referencias/` (ex.: `chem6-1.png`).
+2. Eu converto cada mapa na sequência de peças e confiro a forma pelo minimapa.
+3. O editor de pistas (fase 7) permite ajustes finos visuais.
+Enquanto isso, `chem6-1` é uma pista provisória no estilo de Chem VI.
 - **Editor de pistas no navegador** (grade 2D clicável) para recriar as pistas rapidamente a
   partir de mapas/capturas do original e criar novas.
 - Cada planeta tem ~ 7–8 pistas no original; começamos por Chem VI completo.
@@ -137,8 +158,8 @@ As pistas do original são grades de blocos isométricos com altura. Vamos usar 
 
 | # | Entrega | Resultado jogável |
 |---|---|---|
-| 0 | Setup Vite + TS + Three.js, loop de jogo com passo fixo | Tela com cena 3D |
-| 1 | Física arcade de 1 carro + pista de teste + **3 câmeras** | Dirigir e alternar iso/cockpit/chase |
+| 0 ✅ | Setup Vite + TS + Three.js, loop de jogo com passo fixo | Tela com cena 3D |
+| 1 ✅ | Física arcade de 1 carro + pista de teste + **3 câmeras** + toque no celular | Dirigir e alternar iso/cockpit/chase |
 | 2 | Formato de pista em tiles + gerador + rampas/saltos + checkpoints/voltas | Correr voltas cronometradas |
 | 3 | 3 oponentes de IA + posições + tela de resultado | Corrida completa de 4 carros |
 | 4 | Armas (frontal, traseira, nitro), dano, explosão, respawn, dinheiro na pista | Corrida de combate |
@@ -153,11 +174,9 @@ As fases 0–4 formam o **protótipo vertical** (uma pista de Chem VI jogável c
 duas câmeras) — é a melhor forma de validar a sensação do jogo antes de produzir conteúdo.
 
 ## 9. Riscos e cuidados
-- **Propriedade intelectual:** *Rock n' Roll Racing*, seus nomes, personagens, sprites, falas e
-  as músicas licenciadas (Paranoid, Born to Be Wild, Highway Star, Radar Love, Peter Gunn,
-  Bad to the Bone) pertencem à Blizzard/Interplay e aos artistas. Para uso **pessoal/estudo**,
-  tudo bem seguir de perto; para **publicar ou distribuir**, recomendo nomes/visuais próprios
-  inspirados no original e música original ou livre de direitos. (ver pergunta 1)
+- **Propriedade intelectual:** projeto de uso pessoal. As músicas originais (Paranoid, Born to Be
+  Wild, Highway Star...) não podem ser incluídas no repositório; o jogo vai aceitar arquivos de
+  música que você coloque localmente em `public/audio/music/`.
 - **Cockpit em pistas feitas para visão aérea** pode ficar confuso → sinalização, retrovisor e
   minimapa já previstos; possível ajuste de largura das pistas.
 - **Física arcade** exige muita iteração de "sensação" → fase 1 dedicada só a isso.
