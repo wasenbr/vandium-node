@@ -7,6 +7,16 @@ export function formatTime(t: number): string {
   return `${m}:${s.toFixed(2).padStart(5, '0')}`;
 }
 
+/** Ícones das armas (SVG simples, herdam a cor do texto). */
+export const ICONS: Record<string, string> = {
+  laser: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z" fill="currentColor"/></svg>',
+  missile:
+    '<svg viewBox="0 0 24 24"><path d="M12 2c3 3 4 7 4 11l3 3v3l-4-2-1 3h-4l-1-3-4 2v-3l3-3c0-4 1-8 4-11z" fill="currentColor"/><circle cx="12" cy="9" r="1.8" fill="#000" opacity=".5"/></svg>',
+  mine: '<svg viewBox="0 0 24 24"><g stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 2v4M12 18v4M2 12h4M18 12h4M5 5l3 3M16 16l3 3M5 19l3-3M16 8l3-3"/></g><circle cx="12" cy="12" r="5.5" fill="currentColor"/><circle cx="12" cy="12" r="1.6" fill="#ff2a1a"/></svg>',
+  oil: '<svg viewBox="0 0 24 24"><path d="M12 2s7 8 7 13a7 7 0 0 1-14 0c0-5 7-13 7-13z" fill="currentColor"/><path d="M9 15a3 3 0 0 0 3 3" stroke="#fff" stroke-width="1.5" fill="none" opacity=".6"/></svg>',
+  nitro: '<svg viewBox="0 0 24 24"><path d="M12 2c1 4 6 6 6 12a6 6 0 0 1-12 0c0-3 2-5 3-6 0 2 1 3 2 3 0-3-1-6 1-9z" fill="currentColor"/></svg>',
+};
+
 export interface HudData {
   time: number;
   best: number | null;
@@ -16,8 +26,8 @@ export interface HudData {
   /** 0..1 */
   armor: number;
   money: number;
-  front: { label: string; n: number; max: number };
-  rear: { label: string; n: number; max: number };
+  front: { label: string; icon: string; n: number; max: number };
+  rear: { label: string; icon: string; n: number; max: number };
   nitro: number;
   nitroMax: number;
   boosting: boolean;
@@ -48,18 +58,22 @@ export class Hud {
   constructor(root: HTMLElement) {
     this.el = document.createElement('div');
     this.el.className = 'hud';
+    // layout do original: armas com contagem no alto à esquerda, voltas e posição no alto à direita
     this.el.innerHTML = `
       <div class="hud-tl">
+        <div class="hud-weapons"></div>
+        <div class="hud-armor"><span>BLINDAGEM</span><div><i></i></div></div>
+        <div class="hud-money">$0</div>
+      </div>
+      <div class="hud-tr">
+        <div class="hud-lap"><span>VOLTA</span><b>1/4</b></div>
         <div class="hud-pos"><b>1º</b><span>/4</span></div>
-        <div class="hud-lap">VOLTA <b>1/4</b></div>
         <div class="hud-time">0:00.00</div>
         <div class="hud-best"></div>
+        <canvas class="hud-map" width="180" height="180"></canvas>
       </div>
-      <canvas class="hud-map" width="180" height="180"></canvas>
       <div class="hud-bl">
-        <div class="hud-weapons"></div>
-        <div class="hud-armor"><i></i></div>
-        <div class="hud-speed"><b>0</b> km/h <span class="hud-money">$0</span></div>
+        <div class="hud-speed"><b>0</b> km/h</div>
       </div>
       <div class="hud-center"></div>
       <div class="hud-toast"></div>
@@ -109,12 +123,12 @@ export class Hud {
     const ratio = Math.max(0, data.armor);
     this.armor.style.width = `${Math.round(ratio * 100)}%`;
     this.armor.className = ratio < 0.3 ? 'low' : ratio < 0.6 ? 'mid' : '';
-    const row = (label: string, n: number, max: number, cls: string, active = false) =>
-      `<div class="w ${cls}${active ? ' active' : ''}"><span>${label}</span>${Array.from({ length: max }, (_, i) => `<i class="${i < n ? 'on' : ''}"></i>`).join('')}</div>`;
+    const slot = (icon: string, label: string, n: number, cls: string, active = false) =>
+      `<div class="w ${cls}${active ? ' active' : ''}${n === 0 ? ' empty' : ''}" title="${label}">${ICONS[icon]}<b>${n}</b></div>`;
     const html =
-      row(data.front.label, data.front.n, data.front.max, 'front') +
-      row(data.rear.label, data.rear.n, data.rear.max, 'rear') +
-      row('NITRO', data.nitro, data.nitroMax, 'nitro', data.boosting);
+      slot(data.front.icon, data.front.label, data.front.n, 'front') +
+      slot(data.rear.icon, data.rear.label, data.rear.n, 'rear') +
+      slot('nitro', 'NITRO', data.nitro, 'nitro', data.boosting);
     if (this.weapons.dataset.v !== html) {
       this.weapons.innerHTML = html;
       this.weapons.dataset.v = html;

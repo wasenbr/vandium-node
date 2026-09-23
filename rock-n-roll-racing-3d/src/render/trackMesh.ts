@@ -41,6 +41,11 @@ function roadTextures(theme: Theme): { map: THREE.Texture } {
       ctx.ellipse(S * (0.25 + rng() * 0.5), rng() * S, 10 + rng() * 30, 30 + rng() * 80, 0, 0, Math.PI * 2);
       ctx.fill();
     }
+    // sulcos transversais do piso (textura "ranhurada" das pistas do original)
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    for (let y = 0; y < S; y += 16) ctx.fillRect(0, y, S, 4);
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    for (let y = 4; y < S; y += 16) ctx.fillRect(0, y, S, 2);
     // juntas das placas
     ctx.strokeStyle = 'rgba(0,0,0,0.5)';
     ctx.lineWidth = 3;
@@ -164,9 +169,9 @@ function warningTexture(text: string): THREE.CanvasTexture {
   });
 }
 
-// muretas baixas e grossas, em blocos: não escondem os carros na vista isométrica
-const RAIL_HEIGHT = 0.55;
-const RAIL_THICK = 0.7;
+// borda da plataforma: friso baixo e claro, como no original (a colisão continua na simulação)
+const RAIL_HEIGHT = 0.32;
+const RAIL_THICK = 0.55;
 
 /** Ponto de um perfil transversal: deslocamento lateral e altura (relativa à pista ou absoluta). */
 interface ProfilePoint {
@@ -273,37 +278,20 @@ export function buildTrackMesh(track: Track, theme: Theme, shadows: boolean): TH
   // fundo do bloco (visível na câmera de perseguição durante saltos)
   group.add(new THREE.Mesh(sweep(pts, [{ l: -W - RAIL_THICK, y: -0.6 }, { l: W + RAIL_THICK, y: -0.6 }], 8, 8), skirtMat));
 
-  addPillars(group, track, theme, shadows);
+  // faixa clara logo abaixo da borda: marca bem o contorno da plataforma contra o fundo escuro
+  const lipMat = new THREE.MeshStandardMaterial({ map: railTexture(theme), roughness: 0.55, metalness: 0.3 });
+  for (const side of [1, -1]) {
+    const o = side * (W + RAIL_THICK) + side * 0.01;
+    const profile: ProfilePoint[] = [
+      { l: o, y: 0 },
+      { l: o, y: -0.35 },
+    ];
+    if (side > 0) profile.reverse();
+    group.add(new THREE.Mesh(sweep(pts, profile, 8, 4), lipMat));
+  }
   addStartLine(group, track);
   addSigns(group, track);
   return group;
-}
-
-/** Pilares de sustentação sob as partes elevadas. */
-function addPillars(group: THREE.Group, track: Track, theme: Theme, shadows: boolean): void {
-  const pts = track.sampleCenterline(14);
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshStandardMaterial({ map: concreteTexture(theme.skirt), normalMap: concreteNormal(), roughness: 0.9 });
-  const mesh = new THREE.InstancedMesh(geo, mat, pts.length * 2);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const up = new THREE.Vector3(0, 1, 0);
-  let n = 0;
-  for (const p of pts) {
-    const height = p.h - theme.groundLevel;
-    if (height < 1) continue;
-    q.setFromAxisAngle(up, p.heading);
-    for (const side of [1, -1]) {
-      const x = p.x + leftX(p.heading) * side * (track.halfWidth + 1.3);
-      const z = p.z + leftZ(p.heading) * side * (track.halfWidth + 1.3);
-      m.compose(new THREE.Vector3(x, theme.groundLevel + height / 2 - 0.5, z), q, new THREE.Vector3(1.4, height, 1.4));
-      mesh.setMatrixAt(n++, m);
-    }
-  }
-  mesh.count = n;
-  mesh.castShadow = shadows;
-  mesh.receiveShadow = shadows;
-  group.add(mesh);
 }
 
 function addStartLine(group: THREE.Group, track: Track): void {

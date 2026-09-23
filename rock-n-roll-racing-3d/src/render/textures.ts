@@ -117,7 +117,11 @@ export function asphaltNormal(): THREE.Texture {
   return cached('asphalt-n', () => {
     const size = 256;
     const h = fbm(size, 32, 3, 11, 0.6);
-    // juntas das placas (a textura cobre 2 placas no comprimento)
+    // sulcos transversais e juntas das placas (a textura cobre 2 placas no comprimento)
+    for (let y = 0; y < size; y++) {
+      const groove = y % 8 < 2 ? -0.35 : 0;
+      for (let x = 0; x < size; x++) h[y * size + x] += groove;
+    }
     for (let x = 0; x < size; x++) for (const y of [0, 1, size / 2, size / 2 + 1]) h[y * size + x] -= 0.6;
     return normalMap(h, size, 5);
   });

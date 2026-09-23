@@ -20,7 +20,7 @@ import { buildEnvironment, buildGround, buildSky, SUN_DIR } from '../render/envi
 import { contactShadow } from '../render/textures';
 import { PostFx } from '../render/postfx';
 import { buildScenery } from '../render/scenery';
-import { THEMES } from '../render/themes';
+import { darkBackdrop, THEMES } from '../render/themes';
 import { buildTrackMesh, canvasTexture } from '../render/trackMesh';
 import { emptyInput, type ControlInput } from '../sim/input';
 import { clamp, lerp, lerpAngle } from '../sim/math';
@@ -209,7 +209,7 @@ export class Game {
   private loadTrack(def: TrackDef): void {
     if (this.track?.def.id === def.id) return;
     this.track = new Track(def);
-    const theme = THEMES[def.theme];
+    const theme = darkBackdrop(THEMES[def.theme]);
     if (this.level) {
       this.scene.remove(this.level);
       this.level.traverse((o) => {
@@ -228,7 +228,7 @@ export class Game {
     oldEnv?.dispose();
     this.sky = buildSky(theme);
     this.level.add(this.sky);
-    this.scene.fog = new THREE.Fog(theme.fog, 170, 480);
+    this.scene.fog = new THREE.Fog(theme.fog, 150, 420);
     this.hemi.color.set(theme.ambientSky);
     this.hemi.groundColor.set(theme.ambientGround);
     this.sun.color.set(theme.sun);
@@ -839,8 +839,8 @@ export class Game {
         total: world.racers.length,
         armor: r.armor / r.spec.armor,
         money: r.money,
-        front: { label: WEAPON_LABEL[r.spec.front].toUpperCase(), n: r.frontCharges, max: r.spec.frontCharges },
-        rear: { label: WEAPON_LABEL[r.spec.rear].toUpperCase(), n: r.rearCharges, max: r.spec.rearCharges },
+        front: { label: WEAPON_LABEL[r.spec.front], icon: r.spec.front, n: r.frontCharges, max: r.spec.frontCharges },
+        rear: { label: WEAPON_LABEL[r.spec.rear], icon: r.spec.rear, n: r.rearCharges, max: r.spec.rearCharges },
         nitro: pc.nitroCharges,
         nitroMax: r.spec.nitroCharges,
         boosting: pc.nitroTime > 0,

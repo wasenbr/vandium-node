@@ -86,3 +86,30 @@ export const THEMES: Record<ThemeId, Theme> = {
     sunIntensity: 2.4, ambientSky: 0xff9070, ambientGround: 0x401008,
   },
 };
+
+const dim = (c: number, k: number) => {
+  const r = ((c >> 16) & 255) * k;
+  const g = ((c >> 8) & 255) * k;
+  const b = (c & 255) * k;
+  return (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+};
+
+/**
+ * Fundo escuro como no original: as pistas flutuam sobre um vazio quase preto, com só um tom
+ * da cor do planeta. O terreno fica bem abaixo e escuro; a pista continua bem iluminada.
+ */
+export function darkBackdrop(t: Theme): Theme {
+  return {
+    ...t,
+    skyHorizon: dim(t.skyHorizon, 0.28),
+    skyTop: dim(t.skyTop, 0.12),
+    fog: dim(t.skyHorizon, 0.12),
+    groundLevel: Math.min(t.groundLevel, -11),
+    ground: dim(t.ground, t.liquidEmissive > 0x400000 ? 0.8 : 0.3),
+    liquidEmissive: t.liquidEmissive > 0x400000 ? t.liquidEmissive : dim(t.liquidEmissive, 0.4),
+    skirt: dim(t.skirt, 0.45),
+    props: t.props.map((c) => dim(c, 0.55)),
+    ambientSky: dim(t.ambientSky, 0.7),
+    ambientGround: dim(t.ambientGround, 0.4),
+  };
+}
